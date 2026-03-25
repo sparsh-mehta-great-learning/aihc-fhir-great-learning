@@ -139,8 +139,10 @@ async function pollPluginRegistry(manual = false) {
       signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const panels = Array.isArray(data.panels) ? data.panels : [];
+    const raw = await res.json();
+    // n8n wraps responses in an array — unwrap if needed
+    const payload = Array.isArray(raw) ? raw[0] : raw;
+    const panels = Array.isArray(payload.panels) ? payload.panels : [];
     reconcilePlugins(panels);
     if (manual) setPluginStatus(`${panels.length} plugin(s) loaded`, 'ok');
   } catch (err) {
@@ -257,6 +259,9 @@ function runAutoPlugins() {
  *   { text }   → render preformatted text
  *   { cards }  → render CDS-style cards
  *   { table }  → render a data table
+ *
+ * NOTE: n8n always wraps its response in an array — e.g. [{ html: "..." }]
+ * We unwrap it here before passing to renderPluginResponse.
  */
 async function runPlugin(pluginId) {
   const plugin = pluginRegistry.get(pluginId);
@@ -284,7 +289,9 @@ async function runPlugin(pluginId) {
     });
 
     if (!res.ok) throw new Error(`Webhook returned HTTP ${res.status}`);
-    const data = await res.json();
+    const raw = await res.json();
+    // n8n wraps responses in an array — unwrap if needed
+    const data = Array.isArray(raw) ? raw[0] : raw;
     contentEl.innerHTML = renderPluginResponse(data, plugin);
 
   } catch (err) {
@@ -730,7 +737,9 @@ async function generateAISummary(type) {
       signal:  AbortSignal.timeout(30000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const raw = await res.json();
+    // n8n wraps responses in an array — unwrap if needed
+    const data = Array.isArray(raw) ? raw[0] : raw;
     content.innerHTML = renderPluginResponse(data, { label: type });
   } catch (err) {
     content.innerHTML = `<div class="plugin-error">
@@ -769,5 +778,3 @@ function escapeHtml(str) {
 function showLoading(show) {
   elements.loadingOverlay?.classList.toggle('hidden', !show);
 }
-
-
