@@ -192,6 +192,8 @@ services:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      # OpenAI key — referenced in workflows as $env.OPENAI_API_KEY
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
       - "${N8N_PORT}:${N8N_PORT}"
     volumes:
