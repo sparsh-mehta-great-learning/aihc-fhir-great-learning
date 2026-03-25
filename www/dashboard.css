@@ -1,0 +1,819 @@
+/* EPIC EHR Dashboard - Matching EpicCare interface */
+/* Purple brand colors, patient banner, activity sidebar, chart layout */
+
+:root {
+  --epic-purple: #5c2d91;
+  --epic-purple-dark: #4a2375;
+  --epic-purple-light: #7c4da8;
+  --epic-gray-1: #f4f4f4;
+  --epic-gray-2: #e8e8e8;
+  --epic-gray-3: #d4d4d4;
+  --epic-gray-4: #8c8c8c;
+  --epic-gray-5: #4a4a4a;
+  --epic-text: #333;
+  --epic-white: #fff;
+  --epic-border: #d0d0d0;
+  --epic-danger: #c53030;
+  --epic-warning: #b7791f;
+  --epic-ai-accent: #38a169;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 13px;
+  color: var(--epic-text);
+  background: var(--epic-gray-1);
+}
+
+/* EPIC Header - Purple bar */
+.epic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 16px;
+  background: var(--epic-purple);
+  color: var(--epic-white);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+}
+
+.epic-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.epic-logo-icon {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.5px;
+}
+
+.epic-product {
+  font-size: 14px;
+  opacity: 0.95;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255,255,255,0.4);
+}
+
+.epic-header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 12px;
+}
+
+.epic-user, .epic-date {
+  opacity: 0.9;
+}
+
+.epic-exit {
+  color: var(--epic-white);
+  text-decoration: none;
+  opacity: 0.9;
+}
+
+.epic-exit:hover {
+  text-decoration: underline;
+}
+
+/* EPIC Top Tab Navigation */
+.epic-nav-tabs {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  background: var(--epic-purple-dark);
+  color: var(--epic-white);
+  position: fixed;
+  top: 44px;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  gap: 2px;
+}
+
+.epic-tab {
+  padding: 8px 16px;
+  color: rgba(255,255,255,0.85);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.epic-tab:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--epic-white);
+}
+
+.epic-tab.active {
+  background: var(--epic-gray-1);
+  color: var(--epic-purple);
+}
+
+.epic-tab-spacer {
+  flex: 1;
+}
+
+/* EPIC Patient Banner - Horizontal demographics bar */
+.epic-patient-banner {
+  background: var(--epic-purple);
+  color: var(--epic-white);
+  padding: 8px 16px;
+  font-size: 12px;
+  position: fixed;
+  top: 80px;
+  left: 0;
+  right: 0;
+  z-index: 98;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 0;
+}
+
+.banner-field {
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.banner-field strong {
+  font-weight: 600;
+}
+
+.banner-divider {
+  color: rgba(255,255,255,0.5);
+  font-size: 10px;
+}
+
+.banner-change-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: var(--epic-white);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.banner-change-btn:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+.banner-delete-btn {
+  background: rgba(197, 48, 48, 0.6);
+  border-color: rgba(255,255,255,0.5);
+}
+
+.banner-delete-btn:hover {
+  background: rgba(197, 48, 48, 0.8);
+}
+
+/* Layout - Account for fixed header + tabs + optional banner */
+.epic-layout {
+  display: flex;
+  min-height: 100vh;
+  padding-top: 80px;
+}
+
+.epic-layout.has-patient {
+  padding-top: 120px;
+}
+
+/* EPIC Activity Sidebar */
+.epic-activity-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--epic-white);
+  border-right: 1px solid var(--epic-border);
+  padding: 12px 0;
+  flex-shrink: 0;
+}
+
+.activity-section {
+  padding: 0 12px 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+  margin-bottom: 12px;
+}
+
+.activity-section:last-child {
+  border-bottom: none;
+}
+
+.activity-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--epic-gray-5);
+  margin-bottom: 8px;
+}
+
+.activity-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-search input {
+  padding: 6px 10px;
+  border: 1px solid var(--epic-border);
+  font-size: 12px;
+  outline: none;
+}
+
+.activity-search input:focus {
+  border-color: var(--epic-purple);
+}
+
+.activity-search-btn {
+  padding: 6px 12px;
+  background: var(--epic-purple);
+  color: var(--epic-white);
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.activity-search-btn:hover {
+  background: var(--epic-purple-dark);
+}
+
+.activity-item {
+  display: block;
+  padding: 8px 10px;
+  color: var(--epic-text);
+  text-decoration: none;
+  font-size: 13px;
+  margin: 2px 0;
+  border-radius: 2px;
+}
+
+.activity-item:hover {
+  background: var(--epic-gray-1);
+}
+
+.activity-item.active {
+  background: rgba(92, 45, 145, 0.12);
+  color: var(--epic-purple);
+  font-weight: 600;
+}
+
+.activity-ai .activity-label {
+  color: var(--epic-ai-accent);
+}
+
+.ai-label {
+  font-size: 9px;
+  padding: 1px 4px;
+  background: var(--epic-ai-accent);
+  color: white;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+
+/* EPIC Main Content */
+.epic-main {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--epic-gray-1);
+  min-width: 0;
+}
+
+.epic-content-panel {
+  background: var(--epic-white);
+  border: 1px solid var(--epic-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+  background: var(--epic-white);
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--epic-text);
+}
+
+.panel-header-flex {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-header-flex .epic-btn {
+  flex-shrink: 0;
+}
+
+.panel-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--epic-gray-4);
+}
+
+.epic-data-content {
+  padding: 16px;
+  min-height: 200px;
+  font-size: 13px;
+}
+
+/* Patient List */
+.epic-patient-list {
+  min-height: 300px;
+}
+
+.epic-patient-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+  cursor: pointer;
+}
+
+.epic-patient-item:hover {
+  background: var(--epic-gray-1);
+}
+
+.patient-item-name {
+  font-weight: 600;
+  color: var(--epic-text);
+}
+
+.patient-item-meta {
+  font-size: 11px;
+  color: var(--epic-gray-4);
+}
+
+.patient-item-mrn {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--epic-gray-2);
+  color: var(--epic-gray-5);
+  border-radius: 2px;
+}
+
+.empty-message {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--epic-gray-4);
+}
+
+/* Data Tables - EPIC style */
+.epic-data-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+  font-size: 13px;
+}
+
+.epic-data-row:last-child {
+  border-bottom: none;
+}
+
+.epic-data-row.header {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--epic-gray-5);
+  background: var(--epic-gray-1);
+}
+
+/* Demographics Grid */
+.demographics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.demographics-item {
+  padding: 8px 0;
+}
+
+.demographics-item .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--epic-gray-4);
+  margin-bottom: 2px;
+}
+
+.demographics-item .value {
+  font-weight: 600;
+}
+
+/* AI Panels */
+.epic-ai-panel .epic-btn {
+  margin: 0 16px 16px;
+}
+
+.epic-ai-output {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.ai-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--epic-ai-accent);
+  color: white;
+  border-radius: 2px;
+  font-weight: 600;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.epic-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.epic-btn-primary {
+  background: var(--epic-purple);
+  color: var(--epic-white);
+  border: none;
+}
+
+.epic-btn-primary:hover:not(:disabled) {
+  background: var(--epic-purple-dark);
+}
+
+.epic-btn-primary:disabled {
+  background: var(--epic-gray-3);
+  color: var(--epic-gray-4);
+  cursor: not-allowed;
+}
+
+/* Tab Panels */
+.epic-tab-panel {
+  display: none;
+}
+
+.epic-tab-panel.active {
+  display: block;
+}
+
+/* Loading */
+.epic-loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255,255,255,0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.epic-loading p {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--epic-gray-5);
+}
+
+.epic-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--epic-gray-3);
+  border-top-color: var(--epic-purple);
+  border-radius: 50%;
+  animation: epic-spin 0.8s linear infinite;
+}
+
+@keyframes epic-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Modal */
+.epic-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.epic-modal.hidden {
+  display: none !important;
+}
+
+.epic-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+}
+
+.epic-modal-content {
+  position: relative;
+  background: var(--epic-white);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.epic-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+}
+
+.epic-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.epic-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--epic-gray-4);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.epic-modal-close:hover {
+  color: var(--epic-text);
+}
+
+.epic-modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.form-row {
+  margin-bottom: 14px;
+}
+
+.form-row label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--epic-gray-5);
+  margin-bottom: 4px;
+}
+
+.form-row input,
+.form-row select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--epic-border);
+  font-size: 13px;
+  outline: none;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  border-color: var(--epic-purple);
+}
+
+.epic-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--epic-gray-2);
+}
+
+.epic-btn-secondary {
+  background: var(--epic-white);
+  color: var(--epic-text);
+  border: 1px solid var(--epic-border);
+}
+
+.epic-btn-secondary:hover {
+  background: var(--epic-gray-1);
+}
+
+/* Utilities */
+.hidden {
+  display: none !important;
+}
+
+.no-data {
+  padding: 24px;
+  text-align: center;
+  color: var(--epic-gray-4);
+  font-style: italic;
+}
+
+.error-msg {
+  padding: 12px;
+  background: #fde8e8;
+  color: var(--epic-danger);
+  border-radius: 2px;
+  margin: 16px 0;
+}
+
+/* Allergy styling */
+.allergy-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--epic-gray-2);
+}
+
+.allergy-item.severe {
+  border-left: 4px solid var(--epic-danger);
+  background: #fef2f2;
+}
+
+/* ═══════════════════════════════════════════════════
+   n8n PLUGIN REGISTRY — additional styles
+   ═══════════════════════════════════════════════════ */
+
+/* Refresh button next to "AI Features" label */
+.plugin-refresh-btn {
+  background: none;
+  border: none;
+  color: var(--epic-ai-accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  vertical-align: middle;
+  line-height: 1;
+  opacity: 0.7;
+}
+.plugin-refresh-btn:hover { opacity: 1; }
+
+/* Tiny "n8n" badge on dynamic sidebar links */
+.plugin-badge {
+  font-size: 9px;
+  padding: 1px 4px;
+  background: var(--epic-ai-accent);
+  color: white;
+  border-radius: 2px;
+  margin-left: 4px;
+  vertical-align: middle;
+  opacity: 0.85;
+}
+
+/* Status message under AI Features section */
+.plugin-status {
+  font-size: 10px;
+  padding: 4px 10px;
+  color: var(--epic-gray-4);
+  min-height: 16px;
+}
+.plugin-status-ok   { color: var(--epic-ai-accent); }
+.plugin-status-warn { color: var(--epic-warning); }
+
+/* Plugin panel output area */
+.epic-plugin-output {
+  min-height: 120px;
+}
+
+/* Inline spinner for loading states */
+.epic-spinner-inline {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid var(--epic-gray-3);
+  border-top-color: var(--epic-purple);
+  border-radius: 50%;
+  animation: epic-spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* Plugin error box */
+.plugin-error {
+  padding: 12px 16px;
+  background: #fef2f2;
+  color: var(--epic-danger);
+  border-left: 3px solid var(--epic-danger);
+  margin: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.plugin-error code, .plugin-error a {
+  font-size: 11px;
+  color: inherit;
+}
+
+/* Plugin raw HTML output */
+.plugin-html-output {
+  padding: 8px 0;
+  line-height: 1.6;
+}
+
+/* Plugin preformatted text */
+.plugin-text-output {
+  background: var(--epic-gray-1);
+  border: 1px solid var(--epic-gray-2);
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 2px;
+  margin: 0;
+}
+
+/* Plugin CDS-style cards */
+.plugin-card {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: 3px;
+  border-left: 4px solid;
+  line-height: 1.5;
+}
+.plugin-card.card-warn {
+  background: #fffbeb;
+  border-color: var(--epic-warning);
+}
+.plugin-card.card-crit {
+  background: #fef2f2;
+  border-color: var(--epic-danger);
+}
+.plugin-card.card-info {
+  background: #ebf8ff;
+  border-color: #3182ce;
+}
+.plugin-card-summary {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.plugin-card-detail {
+  font-size: 12px;
+  color: var(--epic-gray-5);
+}
+.plugin-card-source {
+  font-size: 10px;
+  color: var(--epic-gray-4);
+  margin-top: 6px;
+}
+
+/* Plugin table */
+.plugin-table-wrap {
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.plugin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.plugin-table th {
+  background: var(--epic-gray-1);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--epic-gray-5);
+  border-bottom: 2px solid var(--epic-gray-2);
+}
+.plugin-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--epic-gray-2);
+  color: var(--epic-text);
+}
+.plugin-table tr:hover td {
+  background: var(--epic-gray-1);
+}

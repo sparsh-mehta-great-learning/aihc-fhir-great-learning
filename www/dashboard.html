@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EpicCare - Chart</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <header class="epic-header">
+        <div class="epic-logo">
+            <span class="epic-logo-icon">Epic</span>
+            <span class="epic-product">EpicCare</span>
+        </div>
+        <div class="epic-header-right">
+            <span class="epic-user">Provider</span>
+            <span class="epic-date" id="currentDate"></span>
+            <a href="index.html" class="epic-exit">Exit</a>
+        </div>
+    </header>
+
+    <nav class="epic-nav-tabs">
+        <a href="#" class="epic-tab active">Patient</a>
+        <a href="#" class="epic-tab">Chart</a>
+        <a href="#" class="epic-tab">In Basket</a>
+        <a href="#" class="epic-tab">Tools</a>
+        <span class="epic-tab-spacer"></span>
+    </nav>
+
+    <div id="patientBanner" class="epic-patient-banner hidden">
+        <div class="banner-content">
+            <span class="banner-field"><strong>MRN:</strong> <span id="bannerMRN">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Name:</strong> <span id="bannerName">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>DOB:</strong> <span id="bannerDOB">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Age:</strong> <span id="bannerAge">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Sex:</strong> <span id="bannerSex">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Phone:</strong> <span id="bannerPhone">—</span></span>
+            <button type="button" id="editPatientBtn" class="banner-change-btn">Edit</button>
+            <button type="button" id="deletePatientBtn" class="banner-change-btn banner-delete-btn">Delete</button>
+            <button type="button" id="clearPatientBtn" class="banner-change-btn">Change Patient</button>
+        </div>
+    </div>
+
+    <div class="epic-layout">
+        <aside class="epic-activity-sidebar">
+            <div class="activity-section">
+                <div class="activity-label">Patient</div>
+                <div class="activity-search">
+                    <input type="text" id="patientSearch" placeholder="Search by name or MRN..." autocomplete="off">
+                    <button type="button" id="searchBtn" class="activity-search-btn">Search</button>
+                </div>
+            </div>
+            <div class="activity-section">
+                <div class="activity-label">Chart Review</div>
+                <a href="#" class="activity-item active" data-tab="allergies">Allergies</a>
+                <a href="#" class="activity-item" data-tab="chart">Chart Review</a>
+                <a href="#" class="activity-item" data-tab="problems">Problem List</a>
+                <a href="#" class="activity-item" data-tab="medications">Medications</a>
+                <a href="#" class="activity-item" data-tab="labs">Labs</a>
+                <a href="#" class="activity-item" data-tab="vitals">Vitals</a>
+                <a href="#" class="activity-item" data-tab="demographics">Demographics</a>
+            </div>
+            <div class="activity-section activity-ai" id="aiSection">
+                <div class="activity-label">
+                    AI Features
+                    <span class="ai-label">n8n</span>
+                    <button type="button" id="refreshPluginsBtn" class="plugin-refresh-btn" title="Refresh registered plugins">↻</button>
+                </div>
+                <a href="#" class="activity-item" data-tab="discharge">Discharge Summary</a>
+                <a href="#" class="activity-item" data-tab="previsit">Pre-visit Summary</a>
+                <!-- Dynamic plugin sidebar links injected here -->
+                <div id="dynamicPluginLinks"></div>
+                <div id="pluginStatus" class="plugin-status"></div>
+            </div>
+        </aside>
+
+        <main class="epic-main">
+            <section id="patientListSection" class="epic-content-panel">
+                <div class="panel-header panel-header-flex">
+                    <div>
+                        <h2>Patient List</h2>
+                        <p class="panel-subtitle">Search for a patient to open their chart</p>
+                    </div>
+                    <button type="button" id="addPatientBtn" class="epic-btn epic-btn-primary">+ Add Patient</button>
+                </div>
+                <div id="patientList" class="epic-patient-list">
+                    <div class="empty-message">Enter a search term above and click Search to find patients.</div>
+                </div>
+            </section>
+
+            <section id="patientChartSection" class="epic-content-panel hidden">
+                <div id="tabPanels">
+                    <div id="allergiesPanel" class="epic-tab-panel active">
+                        <div class="panel-header"><h2>Allergies</h2></div>
+                        <div id="allergiesContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="chartPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Chart Review</h2>
+                            <p class="panel-subtitle">Recent encounters and conditions</p>
+                        </div>
+                        <div id="overviewContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="problemsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Problem List</h2></div>
+                        <div id="problemsContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="medicationsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Medications</h2></div>
+                        <div id="medicationsContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="labsPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Laboratory Results</h2>
+                            <p class="panel-subtitle">View in table format</p>
+                        </div>
+                        <div id="labsContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="vitalsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Vital Signs</h2></div>
+                        <div id="vitalsContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="demographicsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Demographics</h2></div>
+                        <div id="demographicsContent" class="epic-data-content"></div>
+                    </div>
+                    <div id="dischargePanel" class="epic-tab-panel epic-ai-panel">
+                        <div class="panel-header">
+                            <h2>Discharge Summary <span class="ai-badge">Gen AI</span></h2>
+                            <p class="panel-subtitle">AI-generated discharge summary via n8n workflow</p>
+                        </div>
+                        <button type="button" id="generateDischargeBtn" class="epic-btn epic-btn-primary" disabled>Generate Discharge Summary</button>
+                        <div id="dischargeContent" class="epic-data-content epic-ai-output"></div>
+                    </div>
+                    <div id="previsitPanel" class="epic-tab-panel epic-ai-panel">
+                        <div class="panel-header">
+                            <h2>Pre-visit Summary <span class="ai-badge">Gen AI</span></h2>
+                            <p class="panel-subtitle">AI-generated pre-visit summary via n8n workflow</p>
+                        </div>
+                        <button type="button" id="generatePrevisitBtn" class="epic-btn epic-btn-primary" disabled>Generate Pre-visit Summary</button>
+                        <div id="previsitContent" class="epic-data-content epic-ai-output"></div>
+                    </div>
+                    <!-- Dynamic plugin panels injected here by JS -->
+                    <div id="dynamicPanelContainer"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="patientModal" class="epic-modal hidden">
+        <div class="epic-modal-overlay"></div>
+        <div class="epic-modal-content">
+            <div class="epic-modal-header">
+                <h3 id="patientModalTitle">Add Patient</h3>
+                <button type="button" id="closePatientModal" class="epic-modal-close">&times;</button>
+            </div>
+            <form id="patientForm" class="epic-modal-body">
+                <input type="hidden" id="patientFormId" name="id">
+                <div class="form-row">
+                    <label for="patientFamily">Family Name *</label>
+                    <input type="text" id="patientFamily" name="family" required>
+                </div>
+                <div class="form-row">
+                    <label for="patientGiven">Given Name *</label>
+                    <input type="text" id="patientGiven" name="given" required>
+                </div>
+                <div class="form-row">
+                    <label for="patientBirthDate">Date of Birth</label>
+                    <input type="date" id="patientBirthDate" name="birthDate">
+                </div>
+                <div class="form-row">
+                    <label for="patientGender">Gender</label>
+                    <select id="patientGender" name="gender">
+                        <option value="">—</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                        <option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="patientPhone">Phone</label>
+                    <input type="tel" id="patientPhone" name="phone" placeholder="e.g. 555-123-4567">
+                </div>
+                <div class="form-row">
+                    <label for="patientAddress">Address (street, city, state, postal)</label>
+                    <input type="text" id="patientAddress" name="address" placeholder="123 Main St, Springfield, IL 62701">
+                </div>
+            </form>
+            <div class="epic-modal-footer">
+                <button type="button" id="cancelPatientModal" class="epic-btn epic-btn-secondary">Cancel</button>
+                <button type="button" id="savePatientBtn" class="epic-btn epic-btn-primary">Save Patient</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="epic-loading hidden">
+        <div class="epic-spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>
