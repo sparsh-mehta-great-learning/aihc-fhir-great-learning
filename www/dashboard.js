@@ -3,102 +3,95 @@
  * Connects to HAPI FHIR R4 server + n8n plugin registry
  *
  * ═══════════════════════════════════════════════════════════════
- *  n8n PLUGIN REGISTRY — HOW IT WORKS
+ *  ORIGINAL: n8n PLUGIN REGISTRY (Risk Score, Care Gaps, etc.)
  * ═══════════════════════════════════════════════════════════════
- *
  *  Any n8n workflow can register a new panel in this dashboard.
  *  The dashboard polls GET /webhook/list-panels every 30 seconds
  *  and injects sidebar links + content panels for each plugin.
  *
- *  STEP 1 — In your n8n workflow, add a Webhook node with:
- *    • Path:   register-panel   (GET, no auth)
- *    • Method: GET
+ * ═══════════════════════════════════════════════════════════════
+ *  NEW FEATURE 1: Manual Data Entry
+ *    → Add/update labs, vitals, medications, conditions, allergies
+ *    → Posts directly to FHIR server
+ *    → Missing fields retain previous FHIR value with original date
  *
- *  STEP 2 — Respond with JSON describing your panel:
- *  {
- *    "panels": [
- *      {
- *        "id":          "my-risk-score",          // unique slug, no spaces
- *        "label":       "Risk Score",             // sidebar link text
- *        "title":       "Sepsis Risk Score",      // panel heading
- *        "description": "ML model via n8n",       // subtitle
- *        "webhook":     "my-risk-score-run",      // POST endpoint slug
- *        "trigger":     "auto" | "button",        // auto=load on patient select, button=on demand
- *        "buttonLabel": "Calculate Risk"          // only used when trigger=button
- *      }
- *    ]
- *  }
+ *  NEW FEATURE 2: PDF Report Upload via n8n
+ *    → Sends PDF as base64 to POST /webhook/process-report
+ *    → n8n extracts values and returns structured FHIR resources
+ *    → Merges: fields absent in new report keep previous FHIR value
+ *    → n8n workflow receives: { patientId, fhirBase, reportType,
+ *        keepPrevious, showDates, pdfBase64, filename }
+ *    → n8n workflow returns: { extracted: [...], summary: "...",
+ *        reportDate: "...", resources: [...FHIR resources...] }
  *
- *  STEP 3 — Add a second Webhook node (POST) at path: my-risk-score-run
- *    Receives: { patientId, fhirBase, patientData }
- *    Returns:  { html: "<p>Score: 78%</p>" }
- *             OR { cards: [...CDS cards...] }
- *             OR { text: "Plain text result" }
- *             OR { table: { headers: [...], rows: [[...]] } }
- *
- *  That's it. On next poll (≤30s) your panel appears in the sidebar.
+ *  NEW FEATURE 3: Live Doctor–Patient Consultation
+ *    → Dual-speaker transcript (doctor / patient)
+ *    → Web Speech API for real microphone input (with text fallback)
+ *    → POST /webhook/generate-clinical-notes → SOAP clinical notes
+ *    → POST /webhook/extract-chart-updates   → structured FHIR updates
+ *    → Both results rendered inline; doctor clicks to apply to chart
  * ═══════════════════════════════════════════════════════════════
  */
 
-const FHIR_BASE  = `${window.location.origin}/api/fhir`;
-const N8N_BASE   = `${window.location.origin}/api/n8n`;
-const POLL_MS    = 30000;
+const FHIR_BASE = `${window.location.origin}/api/fhir`;
+const N8N_BASE  = `${window.location.origin}/api/n8n`;
+const POLL_MS   = 30000;
 
 let selectedPatient = null;
 const patientCache  = new Map();
-
-// Registry of dynamic plugins: Map<id, pluginDescriptor>
 const pluginRegistry = new Map();
 
-// ─── DOM REFS ─────────────────────────────────────────────────
+// ─── DOM REFS ──────────────────────────────────────────────────
 const elements = {
-  currentDate:          document.getElementById('currentDate'),
-  patientSearch:        document.getElementById('patientSearch'),
-  searchBtn:            document.getElementById('searchBtn'),
-  addPatientBtn:        document.getElementById('addPatientBtn'),
-  patientList:          document.getElementById('patientList'),
-  patientListSection:   document.getElementById('patientListSection'),
-  patientChartSection:  document.getElementById('patientChartSection'),
-  patientBanner:        document.getElementById('patientBanner'),
-  bannerMRN:            document.getElementById('bannerMRN'),
-  bannerName:           document.getElementById('bannerName'),
-  bannerDOB:            document.getElementById('bannerDOB'),
-  bannerAge:            document.getElementById('bannerAge'),
-  bannerSex:            document.getElementById('bannerSex'),
-  bannerPhone:          document.getElementById('bannerPhone'),
-  editPatientBtn:       document.getElementById('editPatientBtn'),
-  deletePatientBtn:     document.getElementById('deletePatientBtn'),
-  clearPatientBtn:      document.getElementById('clearPatientBtn'),
-  patientModal:         document.getElementById('patientModal'),
-  patientModalTitle:    document.getElementById('patientModalTitle'),
-  patientForm:          document.getElementById('patientForm'),
-  closePatientModal:    document.getElementById('closePatientModal'),
-  cancelPatientModal:   document.getElementById('cancelPatientModal'),
-  savePatientBtn:       document.getElementById('savePatientBtn'),
-  loadingOverlay:       document.getElementById('loadingOverlay'),
-  generateDischargeBtn: document.getElementById('generateDischargeBtn'),
-  generatePrevisitBtn:  document.getElementById('generatePrevisitBtn'),
-  dischargeContent:     document.getElementById('dischargeContent'),
-  previsitContent:      document.getElementById('previsitContent'),
-  dynamicPluginLinks:   document.getElementById('dynamicPluginLinks'),
-  dynamicPanelContainer:document.getElementById('dynamicPanelContainer'),
-  refreshPluginsBtn:    document.getElementById('refreshPluginsBtn'),
-  pluginStatus:         document.getElementById('pluginStatus'),
+  currentDate:           document.getElementById('currentDate'),
+  patientSearch:         document.getElementById('patientSearch'),
+  searchBtn:             document.getElementById('searchBtn'),
+  addPatientBtn:         document.getElementById('addPatientBtn'),
+  patientList:           document.getElementById('patientList'),
+  patientListSection:    document.getElementById('patientListSection'),
+  patientChartSection:   document.getElementById('patientChartSection'),
+  patientBanner:         document.getElementById('patientBanner'),
+  bannerMRN:             document.getElementById('bannerMRN'),
+  bannerName:            document.getElementById('bannerName'),
+  bannerDOB:             document.getElementById('bannerDOB'),
+  bannerAge:             document.getElementById('bannerAge'),
+  bannerSex:             document.getElementById('bannerSex'),
+  bannerPhone:           document.getElementById('bannerPhone'),
+  editPatientBtn:        document.getElementById('editPatientBtn'),
+  deletePatientBtn:      document.getElementById('deletePatientBtn'),
+  clearPatientBtn:       document.getElementById('clearPatientBtn'),
+  patientModal:          document.getElementById('patientModal'),
+  patientModalTitle:     document.getElementById('patientModalTitle'),
+  patientForm:           document.getElementById('patientForm'),
+  closePatientModal:     document.getElementById('closePatientModal'),
+  cancelPatientModal:    document.getElementById('cancelPatientModal'),
+  savePatientBtn:        document.getElementById('savePatientBtn'),
+  loadingOverlay:        document.getElementById('loadingOverlay'),
+  generateDischargeBtn:  document.getElementById('generateDischargeBtn'),
+  generatePrevisitBtn:   document.getElementById('generatePrevisitBtn'),
+  dischargeContent:      document.getElementById('dischargeContent'),
+  previsitContent:       document.getElementById('previsitContent'),
+  dynamicPluginLinks:    document.getElementById('dynamicPluginLinks'),
+  dynamicPanelContainer: document.getElementById('dynamicPanelContainer'),
+  refreshPluginsBtn:     document.getElementById('refreshPluginsBtn'),
+  pluginStatus:          document.getElementById('pluginStatus'),
 };
 
-// ─── BOOT ────────────────────────────────────────────────────
+// ─── BOOT ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setCurrentDate();
   bindEvents();
   loadInitialPatients();
   pollPluginRegistry();
   setInterval(pollPluginRegistry, POLL_MS);
+  initManualEntry();
+  initPdfUpload();
+  initLiveConsult();
 });
 
 function setCurrentDate() {
-  const now = new Date();
   if (elements.currentDate) {
-    elements.currentDate.textContent = now.toLocaleDateString('en-US', {
+    elements.currentDate.textContent = new Date().toLocaleDateString('en-US', {
       weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
     });
   }
@@ -106,9 +99,7 @@ function setCurrentDate() {
 
 function bindEvents() {
   elements.searchBtn?.addEventListener('click', handleSearch);
-  elements.patientSearch?.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') handleSearch();
-  });
+  elements.patientSearch?.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
   elements.clearPatientBtn?.addEventListener('click', clearPatient);
   elements.addPatientBtn?.addEventListener('click', openAddPatientModal);
   elements.editPatientBtn?.addEventListener('click', openEditPatientModal);
@@ -122,55 +113,34 @@ function bindEvents() {
   elements.refreshPluginsBtn?.addEventListener('click', () => pollPluginRegistry(true));
 
   document.querySelectorAll('.activity-item[data-tab]').forEach((item) => {
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      switchTab(item.dataset.tab);
-    });
+    item.addEventListener('click', (e) => { e.preventDefault(); switchTab(item.dataset.tab); });
   });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  PLUGIN REGISTRY
+//  ORIGINAL: PLUGIN REGISTRY (Risk Score, Care Gaps, etc.)
 // ═══════════════════════════════════════════════════════════════
 
 async function pollPluginRegistry(manual = false) {
   try {
-    const res = await fetch(`${N8N_BASE}/webhook/list-panels`, {
-      signal: AbortSignal.timeout(4000),
-    });
+    const res = await fetch(`${N8N_BASE}/webhook/list-panels`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const raw = await res.json();
-    // n8n wraps responses in an array — unwrap if needed
     const payload = Array.isArray(raw) ? raw[0] : raw;
     const panels = Array.isArray(payload.panels) ? payload.panels : [];
     reconcilePlugins(panels);
     if (manual) setPluginStatus(`${panels.length} plugin(s) loaded`, 'ok');
   } catch (err) {
-    // n8n may not have the list-panels workflow — that's fine, silently skip
     if (manual) setPluginStatus('No plugin registry found', 'warn');
   }
 }
 
-/**
- * Diff the incoming panel list against the current registry.
- * Add new panels, remove stale ones, leave existing ones alone.
- */
 function reconcilePlugins(panels) {
   const incomingIds = new Set(panels.map((p) => p.id));
-
-  // Remove plugins no longer registered
-  for (const [id] of pluginRegistry) {
-    if (!incomingIds.has(id)) {
-      removePlugin(id);
-    }
-  }
-
-  // Add new plugins
+  for (const [id] of pluginRegistry) { if (!incomingIds.has(id)) removePlugin(id); }
   for (const panel of panels) {
     if (!panel.id || !panel.label || !panel.webhook) continue;
-    if (!pluginRegistry.has(panel.id)) {
-      registerPlugin(panel);
-    }
+    if (!pluginRegistry.has(panel.id)) registerPlugin(panel);
   }
 }
 
@@ -186,188 +156,106 @@ function removePlugin(id) {
   document.getElementById(`${id}Panel`)?.remove();
 }
 
-/** Inject a sidebar link for the plugin */
 function injectPluginLink(plugin) {
   if (document.getElementById(`plugin-link-${plugin.id}`)) return;
   const a = document.createElement('a');
-  a.href = '#';
-  a.className = 'activity-item plugin-item';
-  a.id = `plugin-link-${plugin.id}`;
-  a.dataset.tab = plugin.id;
+  a.href = '#'; a.className = 'activity-item plugin-item';
+  a.id = `plugin-link-${plugin.id}`; a.dataset.tab = plugin.id;
   a.innerHTML = `${escapeHtml(plugin.label)} <span class="plugin-badge">n8n</span>`;
-  a.addEventListener('click', (e) => {
-    e.preventDefault();
-    switchTab(plugin.id);
-  });
+  a.addEventListener('click', (e) => { e.preventDefault(); switchTab(plugin.id); });
   elements.dynamicPluginLinks.appendChild(a);
 }
 
-/** Inject a full panel div for the plugin */
 function injectPluginPanel(plugin) {
   if (document.getElementById(`${plugin.id}Panel`)) return;
-
   const panel = document.createElement('div');
   panel.id = `${plugin.id}Panel`;
   panel.className = 'epic-tab-panel epic-ai-panel epic-plugin-panel';
   panel.dataset.pluginId = plugin.id;
-
   panel.innerHTML = `
     <div class="panel-header">
       <h2>${escapeHtml(plugin.title || plugin.label)} <span class="ai-badge">n8n</span></h2>
       <p class="panel-subtitle">${escapeHtml(plugin.description || `Powered by n8n webhook: ${plugin.webhook}`)}</p>
     </div>
     ${plugin.trigger === 'button' ? `
-      <button type="button"
-        class="epic-btn epic-btn-primary plugin-run-btn"
-        data-plugin-id="${plugin.id}"
-        disabled>
+      <button type="button" class="epic-btn epic-btn-primary plugin-run-btn" data-plugin-id="${plugin.id}" disabled>
         ${escapeHtml(plugin.buttonLabel || `Run ${plugin.label}`)}
       </button>` : ''}
     <div id="${plugin.id}Content" class="epic-data-content epic-plugin-output">
       <p class="no-data">Select a patient to use this feature.</p>
-    </div>
-  `;
-
+    </div>`;
   elements.dynamicPanelContainer.appendChild(panel);
-
-  // Wire up button if present
-  panel.querySelector('.plugin-run-btn')?.addEventListener('click', () => {
-    runPlugin(plugin.id);
-  });
+  panel.querySelector('.plugin-run-btn')?.addEventListener('click', () => runPlugin(plugin.id));
 }
 
-/** Enable/disable plugin buttons when a patient is selected/cleared */
 function updatePluginButtons(enabled) {
-  document.querySelectorAll('.plugin-run-btn').forEach((btn) => {
-    btn.disabled = !enabled;
-  });
+  document.querySelectorAll('.plugin-run-btn').forEach((btn) => { btn.disabled = !enabled; });
 }
 
-/** Called when a patient is selected — auto-run "auto" trigger plugins */
 function runAutoPlugins() {
   for (const [id, plugin] of pluginRegistry) {
-    if (plugin.trigger === 'auto' || !plugin.trigger) {
-      runPlugin(id);
-    }
+    if (plugin.trigger === 'auto' || !plugin.trigger) runPlugin(id);
   }
 }
 
-/**
- * Call the plugin's n8n webhook with the current patient context.
- * Supports four response formats from n8n:
- *   { html }   → render raw HTML
- *   { text }   → render preformatted text
- *   { cards }  → render CDS-style cards
- *   { table }  → render a data table
- *
- * NOTE: n8n always wraps its response in an array — e.g. [{ html: "..." }]
- * We unwrap it here before passing to renderPluginResponse.
- */
 async function runPlugin(pluginId) {
   const plugin = pluginRegistry.get(pluginId);
   if (!plugin || !selectedPatient) return;
-
   const contentEl = document.getElementById(`${pluginId}Content`);
   if (!contentEl) return;
-
-  contentEl.innerHTML = `<p class="no-data plugin-loading">
-    <span class="epic-spinner-inline"></span> Running ${escapeHtml(plugin.label)}…
-  </p>`;
-
+  contentEl.innerHTML = `<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Running ${escapeHtml(plugin.label)}…</p>`;
   try {
-    const payload = {
-      patientId:   selectedPatient.id,
-      fhirBase:    FHIR_BASE,
-      patientData: selectedPatient,
-    };
-
+    const payload = { patientId: selectedPatient.id, fhirBase: FHIR_BASE, patientData: selectedPatient };
     const res = await fetch(`${N8N_BASE}/webhook/${plugin.webhook}`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-      signal:  AbortSignal.timeout(30000),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(30000),
     });
-
     if (!res.ok) throw new Error(`Webhook returned HTTP ${res.status}`);
     const raw = await res.json();
-    // n8n wraps responses in an array — unwrap if needed
     const data = Array.isArray(raw) ? raw[0] : raw;
     contentEl.innerHTML = renderPluginResponse(data, plugin);
-
   } catch (err) {
-    contentEl.innerHTML = `
-      <div class="plugin-error">
-        <strong>Plugin failed:</strong> ${escapeHtml(err.message)}<br>
-        <small>Check that your n8n workflow at <code>${N8N_BASE}/webhook/${plugin.webhook}</code> is active.</small>
-      </div>`;
+    contentEl.innerHTML = `<div class="plugin-error"><strong>Plugin failed:</strong> ${escapeHtml(err.message)}<br>
+      <small>Check that your n8n workflow at <code>${N8N_BASE}/webhook/${plugin.webhook}</code> is active.</small></div>`;
   }
 }
 
-/** Render whatever format the n8n workflow returns */
 function renderPluginResponse(data, plugin) {
-  // Format 1: { html: "<p>...</p>" }
-  if (data.html) {
-    return `<div class="plugin-html-output">${data.html}</div>`;
-  }
-
-  // Format 2: { cards: [{summary, indicator, detail, source}] }
+  if (data.html) return `<div class="plugin-html-output">${data.html}</div>`;
   if (data.cards && Array.isArray(data.cards)) {
     return data.cards.map((card) => {
-      const cls = card.indicator === 'warning' ? 'card-warn'
-                : card.indicator === 'critical' ? 'card-crit'
-                : 'card-info';
-      return `
-        <div class="plugin-card ${cls}">
-          <div class="plugin-card-summary">${escapeHtml(card.summary || '')}</div>
-          ${card.detail ? `<div class="plugin-card-detail">${escapeHtml(card.detail)}</div>` : ''}
-          ${card.source?.label ? `<div class="plugin-card-source">◦ ${escapeHtml(card.source.label)}</div>` : ''}
-        </div>`;
+      const cls = card.indicator === 'warning' ? 'card-warn' : card.indicator === 'critical' ? 'card-crit' : 'card-info';
+      return `<div class="plugin-card ${cls}">
+        <div class="plugin-card-summary">${escapeHtml(card.summary || '')}</div>
+        ${card.detail ? `<div class="plugin-card-detail">${escapeHtml(card.detail)}</div>` : ''}
+        ${card.source?.label ? `<div class="plugin-card-source">◦ ${escapeHtml(card.source.label)}</div>` : ''}
+      </div>`;
     }).join('');
   }
-
-  // Format 3: { table: { headers: [...], rows: [[...]] } }
   if (data.table && data.table.headers) {
     const { headers, rows } = data.table;
-    return `
-      <div class="plugin-table-wrap">
-        <table class="plugin-table">
-          <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
-          <tbody>${(rows || []).map((row) =>
-            `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell))}</td>`).join('')}</tr>`
-          ).join('')}</tbody>
-        </table>
-      </div>`;
+    return `<div class="plugin-table-wrap"><table class="plugin-table">
+      <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${(rows || []).map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell))}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>`;
   }
-
-  // Format 4: { text: "..." }
-  if (data.text) {
-    return `<pre class="plugin-text-output">${escapeHtml(data.text)}</pre>`;
-  }
-
-  // Fallback: pretty-print JSON
+  if (data.text) return `<pre class="plugin-text-output">${escapeHtml(data.text)}</pre>`;
   return `<pre class="plugin-text-output">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
 }
 
 function setPluginStatus(msg, type = 'ok') {
   const el = elements.pluginStatus;
   if (!el) return;
-  el.textContent = msg;
-  el.className = `plugin-status plugin-status-${type}`;
+  el.textContent = msg; el.className = `plugin-status plugin-status-${type}`;
   setTimeout(() => { el.textContent = ''; el.className = 'plugin-status'; }, 4000);
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  PATIENT MANAGEMENT
+//  ORIGINAL: PATIENT MANAGEMENT
 // ═══════════════════════════════════════════════════════════════
 
-async function loadInitialPatients() {
-  await fetchAndRenderPatients('');
-}
-
-async function handleSearch() {
-  const query = elements.patientSearch?.value?.trim() ?? '';
-  await fetchAndRenderPatients(query);
-}
+async function loadInitialPatients() { await fetchAndRenderPatients(''); }
+async function handleSearch() { await fetchAndRenderPatients(elements.patientSearch?.value?.trim() ?? ''); }
 
 async function fetchAndRenderPatients(query) {
   if (!elements.patientList) return;
@@ -381,14 +269,10 @@ async function fetchAndRenderPatients(query) {
     const bundle = await response.json();
     const patients = bundle.entry?.map((e) => e.resource) ?? [];
     renderPatientList(patients);
-    if (patients.length === 0) {
-      elements.patientList.innerHTML = '<div class="empty-message">No patients found.</div>';
-    }
+    if (patients.length === 0) elements.patientList.innerHTML = '<div class="empty-message">No patients found.</div>';
   } catch (err) {
     elements.patientList.innerHTML = `<div class="error-msg">Unable to fetch patients. Ensure the FHIR server is running. Error: ${err.message}</div>`;
-  } finally {
-    showLoading(false);
-  }
+  } finally { showLoading(false); }
 }
 
 function renderPatientList(patients) {
@@ -397,16 +281,12 @@ function renderPatientList(patients) {
   patients.forEach((p) => patientCache.set(p.id, p));
   elements.patientList.innerHTML = patients.map((p) => {
     const name = formatPatientName(p);
-    return `
-      <div class="epic-patient-item" data-id="${p.id}">
-        <div>
-          <div class="patient-item-name">${escapeHtml(name)}</div>
-          <div class="patient-item-meta">DOB: ${p.birthDate || '—'} | ${p.gender || '—'}</div>
-        </div>
-        <span class="patient-item-mrn">MRN: ${p.id}</span>
-      </div>`;
+    return `<div class="epic-patient-item" data-id="${p.id}">
+      <div><div class="patient-item-name">${escapeHtml(name)}</div>
+      <div class="patient-item-meta">DOB: ${p.birthDate || '—'} | ${p.gender || '—'}</div></div>
+      <span class="patient-item-mrn">MRN: ${p.id}</span>
+    </div>`;
   }).join('');
-
   elements.patientList.querySelectorAll('.epic-patient-item').forEach((el) => {
     el.addEventListener('click', () => {
       const patient = patientCache.get(el.dataset.id);
@@ -422,20 +302,18 @@ function selectPatient(patient) {
   elements.patientChartSection?.classList.remove('hidden');
   elements.patientBanner?.classList.remove('hidden');
   updatePatientBanner(patient);
-
   elements.generateDischargeBtn.disabled = false;
   elements.generatePrevisitBtn.disabled = false;
   updatePluginButtons(true);
-
-  loadAllergies();
-  loadOverview();
-  loadMedications();
-  loadLabs();
-  loadProblems();
-  loadVitals();
-  loadDemographics();
+  // Enable new feature buttons
+  enableEntryButtons(true);
+  enableConsultButtons(true);
+  document.getElementById('processPdfBtn').disabled = !currentPdfFile;
+  // Update consult patient name
+  document.getElementById('consultPatientName').textContent = formatPatientName(patient);
+  loadAllergies(); loadOverview(); loadMedications(); loadLabs();
+  loadProblems(); loadVitals(); loadDemographics();
   runAutoPlugins();
-
   switchTab('allergies');
 }
 
@@ -451,8 +329,8 @@ function clearPatient() {
   elements.dischargeContent.textContent = '';
   elements.previsitContent.textContent = '';
   updatePluginButtons(false);
-
-  // Reset plugin outputs
+  enableEntryButtons(false);
+  enableConsultButtons(false);
   for (const [id] of pluginRegistry) {
     const el = document.getElementById(`${id}Content`);
     if (el) el.innerHTML = '<p class="no-data">Select a patient to use this feature.</p>';
@@ -472,14 +350,12 @@ function updatePatientBanner(p) {
 function switchTab(tabId) {
   document.querySelectorAll('.activity-item').forEach((i) => i.classList.remove('active'));
   document.querySelectorAll('.epic-tab-panel').forEach((p) => p.classList.remove('active'));
-  const item  = document.querySelector(`.activity-item[data-tab="${tabId}"]`);
-  const panel = document.getElementById(`${tabId}Panel`);
-  item?.classList.add('active');
-  panel?.classList.add('active');
+  document.querySelector(`.activity-item[data-tab="${tabId}"]`)?.classList.add('active');
+  document.getElementById(`${tabId}Panel`)?.classList.add('active');
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  FHIR HELPERS
+//  ORIGINAL: FHIR HELPERS
 // ═══════════════════════════════════════════════════════════════
 
 async function fhirGet(resource, params = {}) {
@@ -490,16 +366,14 @@ async function fhirGet(resource, params = {}) {
 }
 async function fhirPost(resource, body) {
   const res = await fetch(`${FHIR_BASE}/${resource}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/fhir+json' },
-    body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/fhir+json' }, body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 async function fhirPut(resource, id, body) {
   const res = await fetch(`${FHIR_BASE}/${resource}/${id}`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/fhir+json' },
-    body: JSON.stringify(body),
+    method: 'PUT', headers: { 'Content-Type': 'application/fhir+json' }, body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -510,20 +384,20 @@ async function fhirDelete(resource, id) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  PATIENT CRUD MODAL
+//  ORIGINAL: PATIENT CRUD MODAL
 // ═══════════════════════════════════════════════════════════════
 
 function openAddPatientModal() {
   elements.patientModalTitle.textContent = 'Add Patient';
-  ['patientFormId','patientFamily','patientGiven','patientBirthDate',
-   'patientPhone','patientAddress'].forEach((id) => document.getElementById(id).value = '');
+  ['patientFormId','patientFamily','patientGiven','patientBirthDate','patientPhone','patientAddress']
+    .forEach((id) => document.getElementById(id).value = '');
   document.getElementById('patientGender').value = '';
   elements.patientModal?.classList.remove('hidden');
 }
 function openEditPatientModal() {
   if (!selectedPatient) return;
   elements.patientModalTitle.textContent = 'Edit Patient';
-  const p    = selectedPatient;
+  const p = selectedPatient;
   const name = p.name?.find((n) => n.use === 'official') || p.name?.[0];
   document.getElementById('patientFormId').value    = p.id;
   document.getElementById('patientFamily').value    = name?.family || '';
@@ -533,31 +407,29 @@ function openEditPatientModal() {
   document.getElementById('patientPhone').value     = p.telecom?.find((t) => t.system === 'phone')?.value || '';
   const addr = p.address?.[0];
   document.getElementById('patientAddress').value   = addr
-    ? [addr.line?.join(', '), addr.city, addr.state, addr.postalCode].filter(Boolean).join(', ')
-    : '';
+    ? [addr.line?.join(', '), addr.city, addr.state, addr.postalCode].filter(Boolean).join(', ') : '';
   elements.patientModal?.classList.remove('hidden');
 }
 function closePatientModal() { elements.patientModal?.classList.add('hidden'); }
 
 function buildPatientResource() {
-  const id        = document.getElementById('patientFormId').value?.trim();
-  const family    = document.getElementById('patientFamily').value?.trim();
-  const given     = document.getElementById('patientGiven').value?.trim().split(/\s+/).filter(Boolean);
+  const id = document.getElementById('patientFormId').value?.trim();
+  const family = document.getElementById('patientFamily').value?.trim();
+  const given = document.getElementById('patientGiven').value?.trim().split(/\s+/).filter(Boolean);
   const birthDate = document.getElementById('patientBirthDate').value || undefined;
-  const gender    = document.getElementById('patientGender').value || undefined;
-  const phone     = document.getElementById('patientPhone').value?.trim();
-  const addrRaw   = document.getElementById('patientAddress').value?.trim();
-  const resource  = {
+  const gender = document.getElementById('patientGender').value || undefined;
+  const phone = document.getElementById('patientPhone').value?.trim();
+  const addrRaw = document.getElementById('patientAddress').value?.trim();
+  const resource = {
     resourceType: 'Patient',
-    name: [{ use: 'official', family: family || undefined, given: given.length ? given : undefined }]
-      .filter((n) => n.family || n.given),
+    name: [{ use: 'official', family: family || undefined, given: given.length ? given : undefined }].filter((n) => n.family || n.given),
   };
   if (birthDate) resource.birthDate = birthDate;
-  if (gender)    resource.gender    = gender;
-  if (phone)     resource.telecom   = [{ system: 'phone', value: phone }];
+  if (gender) resource.gender = gender;
+  if (phone) resource.telecom = [{ system: 'phone', value: phone }];
   if (addrRaw) {
     const parts = addrRaw.split(',').map((s) => s.trim());
-    const addr  = { line: parts[0] ? [parts[0]] : undefined, city: parts[1], state: parts[2], postalCode: parts[3] };
+    const addr = { line: parts[0] ? [parts[0]] : undefined, city: parts[1], state: parts[2], postalCode: parts[3] };
     const clean = Object.fromEntries(Object.entries(addr).filter(([, v]) => v));
     if (Object.keys(clean).length) resource.address = [clean];
   }
@@ -570,20 +442,15 @@ async function savePatient() {
   const given  = document.getElementById('patientGiven').value?.trim();
   if (!family || !given) { alert('Family name and Given name are required.'); return; }
   const resource = buildPatientResource();
-  const isEdit   = !!resource.id;
-  showLoading(true);
-  elements.savePatientBtn.disabled = true;
+  const isEdit = !!resource.id;
+  showLoading(true); elements.savePatientBtn.disabled = true;
   try {
     isEdit ? await fhirPut('Patient', resource.id, resource) : await fhirPost('Patient', resource);
     closePatientModal();
     await fetchAndRenderPatients(isEdit ? (elements.patientSearch?.value?.trim() ?? '') : '');
     if (isEdit && selectedPatient?.id === resource.id) selectPatient(patientCache.get(resource.id) || resource);
-  } catch (err) {
-    alert(`Failed to save patient: ${err.message}`);
-  } finally {
-    showLoading(false);
-    elements.savePatientBtn.disabled = false;
-  }
+  } catch (err) { alert(`Failed to save patient: ${err.message}`); }
+  finally { showLoading(false); elements.savePatientBtn.disabled = false; }
 }
 
 async function deletePatient() {
@@ -594,15 +461,12 @@ async function deletePatient() {
     await fhirDelete('Patient', selectedPatient.id);
     clearPatient();
     await fetchAndRenderPatients(elements.patientSearch?.value?.trim() ?? '');
-  } catch (err) {
-    alert(`Failed to delete patient: ${err.message}`);
-  } finally {
-    showLoading(false);
-  }
+  } catch (err) { alert(`Failed to delete patient: ${err.message}`); }
+  finally { showLoading(false); }
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  FHIR DATA LOADERS
+//  ORIGINAL: FHIR DATA LOADERS
 // ═══════════════════════════════════════════════════════════════
 
 async function loadAllergies() {
@@ -610,14 +474,13 @@ async function loadAllergies() {
   if (!el || !selectedPatient) return;
   el.innerHTML = '<p class="no-data">Loading allergies...</p>';
   try {
-    const bundle   = await fhirGet('AllergyIntolerance', { patient: selectedPatient.id, _count: 20 }).catch(() => ({ entry: [] }));
+    const bundle = await fhirGet('AllergyIntolerance', { patient: selectedPatient.id, _count: 20 }).catch(() => ({ entry: [] }));
     const allergies = bundle.entry?.map((e) => e.resource) ?? [];
     el.innerHTML = allergies.length
-      ? allergies.map((a) => `
-          <div class="allergy-item ${a.criticality === 'high' ? 'severe' : ''}">
-            <strong>${a.code?.text || a.code?.coding?.[0]?.display || 'Allergen'}</strong>
-            <span> — ${a.type || '—'} | ${a.criticality || '—'} | ${a.clinicalStatus?.coding?.[0]?.code || '—'}</span>
-          </div>`).join('')
+      ? allergies.map((a) => `<div class="allergy-item ${a.criticality === 'high' ? 'severe' : ''}">
+          <strong>${a.code?.text || a.code?.coding?.[0]?.display || 'Allergen'}</strong>
+          <span> — ${a.type || '—'} | ${a.criticality || '—'} | ${a.clinicalStatus?.coding?.[0]?.code || '—'}</span>
+        </div>`).join('')
       : '<p class="no-data">No known allergies on record.</p>';
   } catch { el.innerHTML = '<p class="no-data">No known allergies on record.</p>'; }
 }
@@ -631,8 +494,8 @@ async function loadOverview() {
       fhirGet('Encounter',  { patient: selectedPatient.id, _count: 10 }).catch(() => ({ entry: [] })),
       fhirGet('Condition',  { patient: selectedPatient.id, _count: 5  }).catch(() => ({ entry: [] })),
     ]);
-    const encounters  = encBundle.entry?.map((e) => e.resource) ?? [];
-    const conditions  = condBundle.entry?.map((e) => e.resource) ?? [];
+    const encounters = encBundle.entry?.map((e) => e.resource) ?? [];
+    const conditions = condBundle.entry?.map((e) => e.resource) ?? [];
     el.innerHTML = `
       <div class="epic-data-row header"><span>Recent Encounters</span><span>Status</span><span>Date</span></div>
       ${encounters.length
@@ -651,7 +514,7 @@ async function loadMedications() {
   el.innerHTML = '<p class="no-data">Loading medications...</p>';
   try {
     const bundle = await fhirGet('MedicationRequest', { patient: selectedPatient.id, _count: 20 });
-    const meds   = bundle.entry?.map((e) => e.resource) ?? [];
+    const meds = bundle.entry?.map((e) => e.resource) ?? [];
     el.innerHTML = meds.length
       ? `<div class="epic-data-row header"><span>Medication</span><span>Status</span><span>Date</span></div>
          ${meds.map((m) => `<div class="epic-data-row"><span>${m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display || '—'}</span><span>${m.status || '—'}</span><span>${m.authoredOn ? new Date(m.authoredOn).toLocaleDateString() : '—'}</span></div>`).join('')}`
@@ -665,7 +528,7 @@ async function loadLabs() {
   el.innerHTML = '<p class="no-data">Loading lab results...</p>';
   try {
     const bundle = await fhirGet('Observation', { patient: selectedPatient.id, category: 'laboratory', _count: 20 });
-    const obs    = bundle.entry?.map((e) => e.resource) ?? [];
+    const obs = bundle.entry?.map((e) => e.resource) ?? [];
     el.innerHTML = obs.length
       ? `<div class="epic-data-row header"><span>Test</span><span>Value</span><span>Date</span></div>
          ${obs.map((o) => `<div class="epic-data-row"><span>${o.code?.text || o.code?.coding?.[0]?.display || 'Lab'}</span><span>${formatObsValue(o)}</span><span>${o.effectiveDateTime ? new Date(o.effectiveDateTime).toLocaleDateString() : '—'}</span></div>`).join('')}`
@@ -678,7 +541,7 @@ async function loadProblems() {
   if (!el || !selectedPatient) return;
   el.innerHTML = '<p class="no-data">Loading problem list...</p>';
   try {
-    const bundle     = await fhirGet('Condition', { patient: selectedPatient.id, _count: 20 });
+    const bundle = await fhirGet('Condition', { patient: selectedPatient.id, _count: 20 });
     const conditions = bundle.entry?.map((e) => e.resource) ?? [];
     el.innerHTML = conditions.length
       ? `<div class="epic-data-row header"><span>Condition</span><span>Status</span><span>Date</span></div>
@@ -704,8 +567,8 @@ async function loadVitals() {
 function loadDemographics() {
   const el = document.getElementById('demographicsContent');
   if (!el || !selectedPatient) return;
-  const p     = selectedPatient;
-  const addr  = p.address?.[0];
+  const p = selectedPatient;
+  const addr = p.address?.[0];
   const items = [
     { label: 'Patient Name', value: formatPatientName(p) },
     { label: 'MRN',          value: p.id },
@@ -720,25 +583,20 @@ function loadDemographics() {
   </div>`;
 }
 
-// ─── Built-in AI Summaries ─────────────────────────────────────
 async function generateAISummary(type) {
   const btn     = type === 'discharge' ? elements.generateDischargeBtn : elements.generatePrevisitBtn;
   const content = type === 'discharge' ? elements.dischargeContent     : elements.previsitContent;
   const webhook = type === 'discharge' ? 'discharge-summary'           : 'previsit-summary';
-
   btn.disabled  = true;
   content.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Generating…</p>';
-
   try {
     const res = await fetch(`${N8N_BASE}/webhook/${webhook}`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ patientId: selectedPatient.id, fhirBase: FHIR_BASE }),
-      signal:  AbortSignal.timeout(30000),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patientId: selectedPatient.id, fhirBase: FHIR_BASE }),
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const raw = await res.json();
-    // n8n wraps responses in an array — unwrap if needed
     const data = Array.isArray(raw) ? raw[0] : raw;
     content.innerHTML = renderPluginResponse(data, { label: type });
   } catch (err) {
@@ -746,12 +604,799 @@ async function generateAISummary(type) {
       <strong>Could not reach n8n workflow.</strong><br>
       <small>Activate the <code>${webhook}</code> workflow at <a href="http://${window.location.hostname}:4014" target="_blank">localhost:4014</a></small>
     </div>`;
+  } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NEW FEATURE 1: MANUAL DATA ENTRY
+//  Posts FHIR resources directly. "Keep previous" means we don't
+//  overwrite existing FHIR observations — we post a new entry
+//  only for the fields actually filled in.
+// ═══════════════════════════════════════════════════════════════
+
+function initManualEntry() {
+  // Type tab switching
+  document.querySelectorAll('.entry-type-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.entry-type-btn').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.entry-section').forEach((s) => s.classList.remove('active-entry'));
+      btn.classList.add('active');
+      document.getElementById(`entry-${btn.dataset.entry}`)?.classList.add('active-entry');
+    });
+  });
+
+  // Set default datetime to now
+  const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  ['lab-date','vital-date'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = nowLocal; });
+
+  // Save buttons
+  document.getElementById('saveLab')?.addEventListener('click', saveLab);
+  document.getElementById('saveVitals')?.addEventListener('click', saveVitals);
+  document.getElementById('saveMed')?.addEventListener('click', saveMedication);
+  document.getElementById('saveCond')?.addEventListener('click', saveCondition);
+  document.getElementById('saveAllergy')?.addEventListener('click', saveAllergyEntry);
+}
+
+function enableEntryButtons(on) {
+  ['saveLab','saveVitals','saveMed','saveCond','saveAllergy'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !on;
+  });
+}
+
+function showEntryFeedback(msg, type = 'success') {
+  const el = document.getElementById('entryFeedback');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `entry-feedback entry-feedback-${type}`;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+async function saveLab() {
+  if (!selectedPatient) return;
+  const name  = document.getElementById('lab-name').value.trim();
+  const value = document.getElementById('lab-value').value.trim();
+  const date  = document.getElementById('lab-date').value;
+  if (!name || !value || !date) { showEntryFeedback('Test name, value, and date are required.', 'error'); return; }
+
+  const loinc  = document.getElementById('lab-loinc').value.trim();
+  const unit   = document.getElementById('lab-unit').value.trim();
+  const ref    = document.getElementById('lab-ref').value.trim();
+  const status = document.getElementById('lab-status').value;
+
+  const obs = {
+    resourceType: 'Observation',
+    status,
+    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory', display: 'Laboratory' }] }],
+    code: { text: name, ...(loinc ? { coding: [{ system: 'http://loinc.org', code: loinc, display: name }] } : {}) },
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    effectiveDateTime: new Date(date).toISOString(),
+    valueQuantity: { value: parseFloat(value), ...(unit ? { unit, system: 'http://unitsofmeasure.org', code: unit } : {}) },
+    ...(ref ? { referenceRange: [{ text: ref }] } : {}),
+  };
+
+  try {
+    document.getElementById('saveLab').disabled = true;
+    await fhirPost('Observation', obs);
+    showEntryFeedback(`✓ Lab result "${name}" saved (${new Date(date).toLocaleDateString()}).`);
+    loadLabs();
+  } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveLab').disabled = false; }
+}
+
+async function saveVitals() {
+  if (!selectedPatient) return;
+  const dateVal = document.getElementById('vital-date').value;
+  const effectiveDateTime = dateVal ? new Date(dateVal).toISOString() : new Date().toISOString();
+  const saved = [];
+
+  const buildObs = (loincCode, displayName, value, unit) => ({
+    resourceType: 'Observation',
+    status: 'final',
+    category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs', display: 'Vital Signs' }] }],
+    code: { coding: [{ system: 'http://loinc.org', code: loincCode, display: displayName }], text: displayName },
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    effectiveDateTime,
+    valueQuantity: { value: parseFloat(value), unit, system: 'http://unitsofmeasure.org', code: unit },
+  });
+
+  const vitalsMap = [
+    { id: 'vital-hr',     loinc: '8867-4',  name: 'Heart Rate',         unit: '/min' },
+    { id: 'vital-spo2',   loinc: '2708-6',  name: 'Oxygen Saturation',  unit: '%' },
+    { id: 'vital-rr',     loinc: '9279-1',  name: 'Respiratory Rate',   unit: '/min' },
+    { id: 'vital-weight', loinc: '29463-7', name: 'Body Weight',        unitId: 'vital-weight-unit' },
+    { id: 'vital-height', loinc: '8302-2',  name: 'Body Height',        unitId: 'vital-height-unit' },
+  ];
+
+  for (const v of vitalsMap) {
+    const val = document.getElementById(v.id)?.value?.trim();
+    if (!val) continue;
+    const unit = v.unitId ? document.getElementById(v.unitId)?.value : v.unit;
+    saved.push(fhirPost('Observation', buildObs(v.loinc, v.name, val, unit)));
+  }
+
+  // Temperature
+  const temp = document.getElementById('vital-temp')?.value?.trim();
+  if (temp) {
+    const tu = document.getElementById('vital-temp-unit')?.value === 'C' ? 'Cel' : '[degF]';
+    saved.push(fhirPost('Observation', buildObs('8310-5', 'Body Temperature', temp, tu)));
+  }
+
+  // Blood Pressure (panel)
+  const bpSys = document.getElementById('vital-bp-sys')?.value?.trim();
+  const bpDia = document.getElementById('vital-bp-dia')?.value?.trim();
+  if (bpSys || bpDia) {
+    const bpObs = {
+      resourceType: 'Observation', status: 'final',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
+      code: { coding: [{ system: 'http://loinc.org', code: '55284-4', display: 'Blood Pressure' }], text: 'Blood Pressure' },
+      subject: { reference: `Patient/${selectedPatient.id}` },
+      effectiveDateTime,
+      component: [
+        ...(bpSys ? [{ code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic BP' }] }, valueQuantity: { value: parseFloat(bpSys), unit: 'mmHg' } }] : []),
+        ...(bpDia ? [{ code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic BP' }] }, valueQuantity: { value: parseFloat(bpDia), unit: 'mmHg' } }] : []),
+      ],
+    };
+    saved.push(fhirPost('Observation', bpObs));
+  }
+
+  if (saved.length === 0) { showEntryFeedback('Please enter at least one vital sign value.', 'error'); return; }
+
+  try {
+    document.getElementById('saveVitals').disabled = true;
+    await Promise.all(saved);
+    showEntryFeedback(`✓ ${saved.length} vital sign(s) saved (${new Date(effectiveDateTime).toLocaleDateString()}).`);
+    loadVitals();
+  } catch (err) { showEntryFeedback(`Failed to save vitals: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveVitals').disabled = false; }
+}
+
+async function saveMedication() {
+  if (!selectedPatient) return;
+  const name = document.getElementById('med-name').value.trim();
+  if (!name) { showEntryFeedback('Medication name is required.', 'error'); return; }
+
+  const rxnorm = document.getElementById('med-rxnorm').value.trim();
+  const dose   = document.getElementById('med-dose').value.trim();
+  const route  = document.getElementById('med-route').value;
+  const freq   = document.getElementById('med-freq').value.trim();
+  const start  = document.getElementById('med-start').value;
+  const status = document.getElementById('med-status').value;
+  const notes  = document.getElementById('med-notes').value.trim();
+
+  const med = {
+    resourceType: 'MedicationRequest',
+    status,
+    intent: 'order',
+    medicationCodeableConcept: {
+      text: name,
+      ...(rxnorm ? { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: rxnorm, display: name }] } : {}),
+    },
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    ...(start ? { authoredOn: start } : {}),
+    dosageInstruction: [{
+      ...(freq ? { text: freq } : {}),
+      ...(dose ? { doseAndRate: [{ doseQuantity: { value: parseFloat(dose) || 1, unit: dose } }] } : {}),
+      ...(route ? { route: { text: route } } : {}),
+      ...(notes ? { patientInstruction: notes } : {}),
+    }],
+  };
+
+  try {
+    document.getElementById('saveMed').disabled = true;
+    await fhirPost('MedicationRequest', med);
+    showEntryFeedback(`✓ Medication "${name}" saved.`);
+    loadMedications();
+  } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveMed').disabled = false; }
+}
+
+async function saveCondition() {
+  if (!selectedPatient) return;
+  const name = document.getElementById('cond-name').value.trim();
+  if (!name) { showEntryFeedback('Condition name is required.', 'error'); return; }
+
+  const icd      = document.getElementById('cond-icd').value.trim();
+  const status   = document.getElementById('cond-status').value;
+  const severity = document.getElementById('cond-severity').value;
+  const onset    = document.getElementById('cond-onset').value;
+  const recorded = document.getElementById('cond-recorded').value;
+
+  const cond = {
+    resourceType: 'Condition',
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: status }] },
+    code: {
+      text: name,
+      ...(icd ? { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10', code: icd, display: name }] } : {}),
+    },
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    ...(onset ? { onsetDateTime: onset } : {}),
+    ...(recorded ? { recordedDate: recorded } : {}),
+    ...(severity ? { severity: { text: severity } } : {}),
+  };
+
+  try {
+    document.getElementById('saveCond').disabled = true;
+    await fhirPost('Condition', cond);
+    showEntryFeedback(`✓ Condition "${name}" saved.`);
+    loadProblems(); loadOverview();
+  } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveCond').disabled = false; }
+}
+
+async function saveAllergyEntry() {
+  if (!selectedPatient) return;
+  const allergen = document.getElementById('allergy-name').value.trim();
+  if (!allergen) { showEntryFeedback('Allergen name is required.', 'error'); return; }
+
+  const type        = document.getElementById('allergy-type').value;
+  const criticality = document.getElementById('allergy-criticality').value;
+  const reaction    = document.getElementById('allergy-reaction').value.trim();
+  const severity    = document.getElementById('allergy-sev').value;
+  const onset       = document.getElementById('allergy-onset').value;
+
+  const allergy = {
+    resourceType: 'AllergyIntolerance',
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] },
+    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'confirmed' }] },
+    type, criticality,
+    code: { text: allergen },
+    patient: { reference: `Patient/${selectedPatient.id}` },
+    ...(onset ? { onsetDateTime: onset } : {}),
+    ...(reaction ? { reaction: [{ manifestation: [{ text: reaction }], ...(severity ? { severity } : {}) }] } : {}),
+  };
+
+  try {
+    document.getElementById('saveAllergy').disabled = true;
+    await fhirPost('AllergyIntolerance', allergy);
+    showEntryFeedback(`✓ Allergy to "${allergen}" saved.`);
+    loadAllergies();
+  } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveAllergy').disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NEW FEATURE 2: PDF REPORT UPLOAD VIA n8n
+//  Sends PDF as base64 to n8n webhook: process-report
+//  n8n extracts values; missing fields keep previous FHIR value
+//
+//  n8n webhook expected at: POST /webhook/process-report
+//  Payload:  { patientId, fhirBase, pdfBase64, filename,
+//              reportType, keepPrevious, showDates }
+//  Response: { extracted: [{name,value,unit,date,isNew},...],
+//              summary: "...", reportDate: "...",
+//              resources: [...FHIR resources to POST...] }
+// ═══════════════════════════════════════════════════════════════
+
+let currentPdfFile = null;
+let pdfExtractedData = null;
+
+function initPdfUpload() {
+  const dropZone   = document.getElementById('pdfDropZone');
+  const fileInput  = document.getElementById('pdfFileInput');
+  const processBtn = document.getElementById('processPdfBtn');
+  const clearBtn   = document.getElementById('clearPdfBtn');
+
+  fileInput?.addEventListener('change', (e) => handlePdfFile(e.target.files[0]));
+  clearBtn?.addEventListener('click', clearPdf);
+  processBtn?.addEventListener('click', processPdf);
+  document.getElementById('applyPdfResultBtn')?.addEventListener('click', applyPdfResult);
+  document.getElementById('discardPdfResultBtn')?.addEventListener('click', () => {
+    document.getElementById('pdfResult').classList.add('hidden');
+    pdfExtractedData = null;
+  });
+
+  // Drag & drop
+  dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone?.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file?.type === 'application/pdf') handlePdfFile(file);
+    else alert('Please drop a PDF file.');
+  });
+}
+
+function handlePdfFile(file) {
+  if (!file) return;
+  currentPdfFile = file;
+  document.getElementById('pdfDropZone').classList.add('has-file');
+  document.getElementById('pdfFileInfo').classList.remove('hidden');
+  document.getElementById('pdfFileName').textContent = file.name;
+  document.getElementById('pdfFileSize').textContent = `(${(file.size / 1024).toFixed(1)} KB)`;
+  document.getElementById('processPdfBtn').disabled = !selectedPatient;
+}
+
+function clearPdf() {
+  currentPdfFile = null;
+  pdfExtractedData = null;
+  document.getElementById('pdfDropZone').classList.remove('has-file');
+  document.getElementById('pdfFileInfo').classList.add('hidden');
+  document.getElementById('pdfFileName').textContent = '';
+  document.getElementById('pdfFileSize').textContent = '';
+  document.getElementById('pdfFileInput').value = '';
+  document.getElementById('processPdfBtn').disabled = true;
+  document.getElementById('pdfResult').classList.add('hidden');
+  document.getElementById('pdfProcessing').classList.add('hidden');
+}
+
+async function processPdf() {
+  if (!currentPdfFile || !selectedPatient) return;
+
+  const processingEl = document.getElementById('pdfProcessing');
+  const msgEl        = document.getElementById('pdfProcessingMsg');
+  const resultEl     = document.getElementById('pdfResult');
+
+  processingEl.classList.remove('hidden');
+  resultEl.classList.add('hidden');
+  document.getElementById('processPdfBtn').disabled = true;
+
+  try {
+    msgEl.textContent = 'Reading PDF file...';
+    const pdfBase64 = await fileToBase64(currentPdfFile);
+
+    msgEl.textContent = 'Sending to n8n for AI extraction...';
+    const payload = {
+      patientId:    selectedPatient.id,
+      fhirBase:     FHIR_BASE,
+      pdfBase64,
+      filename:     currentPdfFile.name,
+      reportType:   document.getElementById('pdfReportType').value,
+      keepPrevious: document.getElementById('pdfKeepPrevious').checked,
+      showDates:    document.getElementById('pdfShowDates').checked,
+      patientName:  formatPatientName(selectedPatient),
+    };
+
+    const res = await fetch(`${N8N_BASE}/webhook/process-report`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(60000),
+    });
+
+    if (!res.ok) throw new Error(`n8n returned HTTP ${res.status}`);
+    const raw = await res.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
+
+    msgEl.textContent = 'Rendering results...';
+    pdfExtractedData = data;
+    renderPdfResult(data);
+
+  } catch (err) {
+    document.getElementById('pdfResultContent').innerHTML = `
+      <div class="plugin-error">
+        <strong>Could not process PDF.</strong><br>
+        ${escapeHtml(err.message)}<br>
+        <small>Make sure the <code>process-report</code> workflow is active in n8n at
+        <a href="http://${window.location.hostname}:4014" target="_blank">localhost:4014</a></small>
+      </div>`;
+    resultEl.classList.remove('hidden');
   } finally {
-    btn.disabled = false;
+    processingEl.classList.add('hidden');
+    document.getElementById('processPdfBtn').disabled = false;
   }
 }
 
-// ─── Utilities ────────────────────────────────────────────────
+function renderPdfResult(data) {
+  const resultEl  = document.getElementById('pdfResult');
+  const metaEl    = document.getElementById('pdfResultMeta');
+  const contentEl = document.getElementById('pdfResultContent');
+
+  metaEl.textContent = [
+    data.reportDate ? `Report date: ${data.reportDate}` : '',
+    data.summary    ? data.summary : '',
+  ].filter(Boolean).join(' · ');
+
+  // If n8n returned pre-rendered HTML
+  if (data.html) { contentEl.innerHTML = data.html; resultEl.classList.remove('hidden'); return; }
+
+  // If n8n returned structured extracted fields
+  if (data.extracted && Array.isArray(data.extracted)) {
+    const showDates = document.getElementById('pdfShowDates').checked;
+    contentEl.innerHTML = `
+      <div class="pdf-extracted-table">
+        <div class="epic-data-row header">
+          <span>Field</span><span>Value</span><span>Unit</span>${showDates ? '<span>Date</span>' : ''}<span>Source</span>
+        </div>
+        ${data.extracted.map((item) => `
+          <div class="epic-data-row ${item.isNew ? 'pdf-row-new' : 'pdf-row-prev'}">
+            <span>${escapeHtml(item.name || '—')}</span>
+            <span><strong>${escapeHtml(String(item.value ?? '—'))}</strong></span>
+            <span>${escapeHtml(item.unit || '—')}</span>
+            ${showDates ? `<span>${item.date ? new Date(item.date).toLocaleDateString() : '—'}</span>` : ''}
+            <span class="pdf-source-badge ${item.isNew ? 'new' : 'prev'}">${item.isNew ? 'This report' : 'Previous'}</span>
+          </div>`).join('')}
+      </div>`;
+    resultEl.classList.remove('hidden');
+    return;
+  }
+
+  // Fallback
+  contentEl.innerHTML = renderPluginResponse(data, {});
+  resultEl.classList.remove('hidden');
+}
+
+async function applyPdfResult() {
+  if (!pdfExtractedData || !selectedPatient) return;
+  const resources = pdfExtractedData.resources;
+  if (!resources || !resources.length) {
+    showEntryFeedback('No FHIR resources returned by n8n to apply.', 'error');
+    return;
+  }
+  document.getElementById('applyPdfResultBtn').disabled = true;
+  try {
+    await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
+    showEntryFeedback(`✓ ${resources.length} resource(s) from PDF applied to chart.`);
+    // Reload affected tabs
+    loadLabs(); loadVitals(); loadMedications(); loadProblems(); loadAllergies();
+    document.getElementById('pdfResult').classList.add('hidden');
+  } catch (err) { showEntryFeedback(`Failed to apply: ${err.message}`, 'error'); }
+  finally { document.getElementById('applyPdfResultBtn').disabled = false; }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NEW FEATURE 3: LIVE DOCTOR–PATIENT CONSULTATION
+//
+//  Flow:
+//  1. Doctor clicks "Start Consultation"
+//  2. Speaker toggles between Doctor / Patient
+//  3. Web Speech API transcribes each speaker's input
+//     (falls back to manual text input if no mic / API unavailable)
+//  4. Transcript builds up with speaker labels + timestamps
+//  5. "Generate Clinical Notes" → POST /webhook/generate-clinical-notes
+//     Receives: { patientId, fhirBase, transcript, patientName }
+//     Returns:  { html } or { text } with SOAP note
+//  6. "Extract & Update Chart" → POST /webhook/extract-chart-updates
+//     Receives: { patientId, fhirBase, transcript, patientName }
+//     Returns:  { html, resources: [...FHIR...] }
+//  7. Doctor reviews and clicks "Apply" to post resources to FHIR
+// ═══════════════════════════════════════════════════════════════
+
+let consultState = {
+  active:        false,
+  currentSpeaker: 'doctor',  // 'doctor' | 'patient'
+  transcript:    [],          // [{speaker, text, time}]
+  recognition:   null,
+  timerInterval: null,
+  startTime:     null,
+};
+
+function initLiveConsult() {
+  document.getElementById('startConsultBtn')?.addEventListener('click', startConsultation);
+  document.getElementById('toggleSpeakerBtn')?.addEventListener('click', toggleSpeaker);
+  document.getElementById('endConsultBtn')?.addEventListener('click', endConsultation);
+  document.getElementById('clearTranscriptBtn')?.addEventListener('click', clearTranscript);
+  document.getElementById('generateClinicalNotesBtn')?.addEventListener('click', generateClinicalNotes);
+  document.getElementById('updateChartFromConsultBtn')?.addEventListener('click', extractChartUpdates);
+  document.getElementById('applyConsultUpdatesBtn')?.addEventListener('click', applyConsultUpdates);
+  document.getElementById('discardConsultUpdatesBtn')?.addEventListener('click', () => {
+    document.getElementById('chartUpdatePreview').classList.add('hidden');
+  });
+  document.getElementById('saveNotesToFhirBtn')?.addEventListener('click', saveNotesToFhir);
+  document.getElementById('copyNotesBtn')?.addEventListener('click', copyClinicalNotes);
+
+  // Text fallback
+  const textInput = document.getElementById('consultTextInput');
+  const addBtn    = document.getElementById('addTranscriptLineBtn');
+  addBtn?.addEventListener('click', addTextLine);
+  textInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') addTextLine(); });
+}
+
+function enableConsultButtons(on) {
+  document.getElementById('startConsultBtn').disabled = !on;
+}
+
+function startConsultation() {
+  if (!selectedPatient) return;
+  consultState.active        = true;
+  consultState.currentSpeaker = 'doctor';
+  consultState.transcript    = [];
+  consultState.startTime     = Date.now();
+
+  setConsultStatus('recording', '● Recording');
+  document.getElementById('startConsultBtn').classList.add('hidden');
+  document.getElementById('toggleSpeakerBtn').classList.remove('hidden');
+  document.getElementById('endConsultBtn').classList.remove('hidden');
+  document.getElementById('toggleSpeakerBtn').disabled = false;
+  document.getElementById('endConsultBtn').disabled = false;
+  document.getElementById('consultTextInput').disabled = false;
+  document.getElementById('addTranscriptLineBtn').disabled = false;
+  document.getElementById('generateClinicalNotesBtn').disabled = false;
+  document.getElementById('updateChartFromConsultBtn').disabled = false;
+
+  updateSpeakerUI();
+  startTimer();
+  startSpeechRecognition();
+  renderTranscript();
+}
+
+function toggleSpeaker() {
+  consultState.currentSpeaker = consultState.currentSpeaker === 'doctor' ? 'patient' : 'doctor';
+  updateSpeakerUI();
+  // Restart recognition with new speaker context
+  stopSpeechRecognition();
+  startSpeechRecognition();
+}
+
+function updateSpeakerUI() {
+  const sp = consultState.currentSpeaker;
+  const label = sp === 'doctor' ? '🩺 Dr. Provider speaking' : '🧑 Patient speaking';
+  document.getElementById('currentSpeakerLabel').textContent = label;
+  document.getElementById('toggleSpeakerBtn').textContent =
+    sp === 'doctor' ? 'Switch to Patient' : 'Switch to Doctor';
+
+  document.getElementById('doctorCard')?.classList.toggle('participant-active', sp === 'doctor');
+  document.getElementById('patientCard')?.classList.toggle('participant-active', sp === 'patient');
+  document.getElementById('doctorMicStatus').className = `mic-indicator ${sp === 'doctor' ? 'on' : 'off'}`;
+  document.getElementById('patientMicStatus').className = `mic-indicator ${sp === 'patient' ? 'on' : 'off'}`;
+  document.getElementById('voiceWave').classList.toggle('hidden', false);
+
+  const speakerSelect = document.getElementById('textInputSpeaker');
+  if (speakerSelect) speakerSelect.value = sp;
+}
+
+function endConsultation() {
+  consultState.active = false;
+  stopSpeechRecognition();
+  stopTimer();
+  setConsultStatus('done', '✓ Ended');
+  document.getElementById('startConsultBtn').classList.remove('hidden');
+  document.getElementById('startConsultBtn').textContent = '🎙 New Consultation';
+  document.getElementById('toggleSpeakerBtn').classList.add('hidden');
+  document.getElementById('endConsultBtn').classList.add('hidden');
+  document.getElementById('voiceWave').classList.add('hidden');
+  document.getElementById('currentSpeakerLabel').textContent = 'Consultation ended';
+  document.getElementById('doctorMicStatus').className = 'mic-indicator off';
+  document.getElementById('patientMicStatus').className = 'mic-indicator off';
+}
+
+function clearTranscript() {
+  consultState.transcript = [];
+  renderTranscript();
+  document.getElementById('clinicalNotesSection').classList.add('hidden');
+  document.getElementById('chartUpdatePreview').classList.add('hidden');
+}
+
+function addTextLine() {
+  const input = document.getElementById('consultTextInput');
+  const text = input?.value?.trim();
+  if (!text) return;
+  const speaker = document.getElementById('textInputSpeaker')?.value || consultState.currentSpeaker;
+  addTranscriptEntry(speaker, text);
+  if (input) input.value = '';
+}
+
+function addTranscriptEntry(speaker, text) {
+  const entry = {
+    speaker,
+    text,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  };
+  consultState.transcript.push(entry);
+  renderTranscript();
+}
+
+function renderTranscript() {
+  const el = document.getElementById('consultTranscript');
+  if (!el) return;
+  if (!consultState.transcript.length) {
+    el.innerHTML = '<p class="no-data">Start a consultation to see the live transcript here...</p>';
+    return;
+  }
+  el.innerHTML = consultState.transcript.map((entry) => `
+    <div class="transcript-line ${entry.speaker}">
+      <span class="transcript-speaker">${entry.speaker === 'doctor' ? '🩺 Dr. Provider' : '🧑 Patient'}</span>
+      <span class="transcript-time">${entry.time}</span>
+      <div class="transcript-text">${escapeHtml(entry.text)}</div>
+    </div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function startSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return; // Fallback to text input — no alert needed
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous     = true;
+  recognition.interimResults = true;
+  recognition.lang           = 'en-US';
+
+  recognition.onresult = (event) => {
+    let interim = '';
+    let final   = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += transcript;
+      else interim += transcript;
+    }
+    if (final.trim()) addTranscriptEntry(consultState.currentSpeaker, final.trim());
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error !== 'no-speech') console.warn('Speech recognition error:', e.error);
+  };
+
+  recognition.onend = () => {
+    // Auto-restart if still active
+    if (consultState.active) {
+      try { recognition.start(); } catch { /* ignore */ }
+    }
+  };
+
+  try {
+    recognition.start();
+    consultState.recognition = recognition;
+  } catch (e) {
+    console.warn('Could not start speech recognition:', e);
+  }
+}
+
+function stopSpeechRecognition() {
+  try { consultState.recognition?.stop(); } catch { /* ignore */ }
+  consultState.recognition = null;
+}
+
+function startTimer() {
+  const durationEl = document.getElementById('consultDuration');
+  consultState.timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - consultState.startTime) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    if (durationEl) durationEl.textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function stopTimer() { clearInterval(consultState.timerInterval); }
+
+function setConsultStatus(cls, label) {
+  const el = document.getElementById('consultStatus');
+  if (!el) return;
+  el.textContent = label;
+  el.className = `consult-status-badge ${cls}`;
+}
+
+function buildTranscriptText() {
+  return consultState.transcript.map((e) =>
+    `[${e.time}] ${e.speaker === 'doctor' ? 'Doctor' : 'Patient'}: ${e.text}`
+  ).join('\n');
+}
+
+async function generateClinicalNotes() {
+  if (!selectedPatient || !consultState.transcript.length) {
+    alert('No transcript to generate notes from.'); return;
+  }
+  const notesSection = document.getElementById('clinicalNotesSection');
+  const notesContent = document.getElementById('clinicalNotesContent');
+  notesSection.classList.remove('hidden');
+  notesContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Generating SOAP notes via n8n...</p>';
+
+  try {
+    const res = await fetch(`${N8N_BASE}/webhook/generate-clinical-notes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientId:    selectedPatient.id,
+        fhirBase:     FHIR_BASE,
+        patientName:  formatPatientName(selectedPatient),
+        transcript:   buildTranscriptText(),
+        rawTranscript: consultState.transcript,
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
+    notesContent.innerHTML = data.html
+      ? `<div class="plugin-html-output">${data.html}</div>`
+      : `<pre class="plugin-text-output">${escapeHtml(data.text || JSON.stringify(data, null, 2))}</pre>`;
+  } catch (err) {
+    notesContent.innerHTML = `<div class="plugin-error">
+      <strong>Could not reach n8n workflow.</strong><br>
+      <small>Activate <code>generate-clinical-notes</code> webhook in n8n.</small><br>
+      <small>${escapeHtml(err.message)}</small>
+    </div>`;
+  }
+}
+
+async function extractChartUpdates() {
+  if (!selectedPatient || !consultState.transcript.length) {
+    alert('No transcript to extract updates from.'); return;
+  }
+  const previewSection = document.getElementById('chartUpdatePreview');
+  const previewContent = document.getElementById('chartUpdateContent');
+  previewSection.classList.remove('hidden');
+  previewContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Extracting chart updates via n8n...</p>';
+
+  try {
+    const res = await fetch(`${N8N_BASE}/webhook/extract-chart-updates`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientId:    selectedPatient.id,
+        fhirBase:     FHIR_BASE,
+        patientName:  formatPatientName(selectedPatient),
+        transcript:   buildTranscriptText(),
+        rawTranscript: consultState.transcript,
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
+    consultState.pendingChartUpdates = data.resources || [];
+    previewContent.innerHTML = data.html
+      ? `<div class="plugin-html-output">${data.html}</div>`
+      : `<pre class="plugin-text-output">${escapeHtml(data.text || JSON.stringify(data, null, 2))}</pre>`;
+  } catch (err) {
+    previewContent.innerHTML = `<div class="plugin-error">
+      <strong>Could not reach n8n workflow.</strong><br>
+      <small>Activate <code>extract-chart-updates</code> webhook in n8n.</small><br>
+      <small>${escapeHtml(err.message)}</small>
+    </div>`;
+  }
+}
+
+async function applyConsultUpdates() {
+  const resources = consultState.pendingChartUpdates;
+  if (!resources || !resources.length) {
+    showEntryFeedback('No FHIR resources to apply.', 'error'); return;
+  }
+  document.getElementById('applyConsultUpdatesBtn').disabled = true;
+  try {
+    await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
+    showEntryFeedback(`✓ ${resources.length} update(s) from consultation applied to chart.`);
+    loadLabs(); loadVitals(); loadMedications(); loadProblems(); loadAllergies(); loadOverview();
+    document.getElementById('chartUpdatePreview').classList.add('hidden');
+    consultState.pendingChartUpdates = [];
+  } catch (err) { showEntryFeedback(`Failed to apply: ${err.message}`, 'error'); }
+  finally { document.getElementById('applyConsultUpdatesBtn').disabled = false; }
+}
+
+async function saveNotesToFhir() {
+  if (!selectedPatient) return;
+  const notesEl = document.getElementById('clinicalNotesContent');
+  const notesText = notesEl?.innerText?.trim();
+  if (!notesText) return;
+
+  const docRef = {
+    resourceType: 'DocumentReference',
+    status: 'current',
+    type: { coding: [{ system: 'http://loinc.org', code: '11488-4', display: 'Consult Note' }], text: 'Clinical Consultation Notes' },
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    date: new Date().toISOString(),
+    content: [{ attachment: { contentType: 'text/plain', data: btoa(unescape(encodeURIComponent(notesText))), title: 'Clinical Notes' } }],
+  };
+
+  document.getElementById('saveNotesToFhirBtn').disabled = true;
+  try {
+    await fhirPost('DocumentReference', docRef);
+    showEntryFeedback('✓ Clinical notes saved to chart as DocumentReference.');
+  } catch (err) { showEntryFeedback(`Failed to save notes: ${err.message}`, 'error'); }
+  finally { document.getElementById('saveNotesToFhirBtn').disabled = false; }
+}
+
+function copyClinicalNotes() {
+  const notesEl = document.getElementById('clinicalNotesContent');
+  const text = notesEl?.innerText?.trim();
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyNotesBtn');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════
+
 function formatPatientName(p) {
   const human = p.name?.find((n) => n.use === 'official') || p.name?.[0];
   if (!human) return 'Unknown';
@@ -775,6 +1420,4 @@ function escapeHtml(str) {
   d.textContent = str;
   return d.innerHTML;
 }
-function showLoading(show) {
-  elements.loadingOverlay?.classList.toggle('hidden', !show);
-}
+function showLoading(show) { elements.loadingOverlay?.classList.toggle('hidden', !show); }
