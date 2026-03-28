@@ -67,10 +67,6 @@ const elements = {
   cancelPatientModal:    document.getElementById('cancelPatientModal'),
   savePatientBtn:        document.getElementById('savePatientBtn'),
   loadingOverlay:        document.getElementById('loadingOverlay'),
-  generateDischargeBtn:  document.getElementById('generateDischargeBtn'),
-  generatePrevisitBtn:   document.getElementById('generatePrevisitBtn'),
-  dischargeContent:      document.getElementById('dischargeContent'),
-  previsitContent:       document.getElementById('previsitContent'),
   dynamicPluginLinks:    document.getElementById('dynamicPluginLinks'),
   dynamicPanelContainer: document.getElementById('dynamicPanelContainer'),
   refreshPluginsBtn:     document.getElementById('refreshPluginsBtn'),
@@ -108,8 +104,6 @@ function bindEvents() {
   elements.cancelPatientModal?.addEventListener('click', closePatientModal);
   elements.savePatientBtn?.addEventListener('click', savePatient);
   elements.patientModal?.querySelector('.epic-modal-overlay')?.addEventListener('click', closePatientModal);
-  elements.generateDischargeBtn?.addEventListener('click', () => generateAISummary('discharge'));
-  elements.generatePrevisitBtn?.addEventListener('click', () => generateAISummary('previsit'));
   elements.refreshPluginsBtn?.addEventListener('click', () => pollPluginRegistry(true));
 
   document.querySelectorAll('.activity-item[data-tab]').forEach((item) => {
@@ -129,17 +123,35 @@ async function pollPluginRegistry(manual = false) {
     const payload = Array.isArray(raw) ? raw[0] : raw;
     const panels = Array.isArray(payload.panels) ? payload.panels : [];
     reconcilePlugins(panels);
+    setN8nConnectionStatus(true, panels.length);
     if (manual) setPluginStatus(`${panels.length} plugin(s) loaded`, 'ok');
   } catch (err) {
-    if (manual) setPluginStatus('No plugin registry found', 'warn');
+    setN8nConnectionStatus(false, 0);
+    if (manual) setPluginStatus('Cannot reach n8n — is it running?', 'warn');
   }
 }
 
+function setN8nConnectionStatus(online, count) {
+  // Show a subtle status dot in the AI Features section label
+  const label = document.querySelector('#aiSection .activity-label');
+  if (!label) return;
+  let dot = document.getElementById('n8nStatusDot');
+  if (!dot) {
+    dot = document.createElement('span');
+    dot.id = 'n8nStatusDot';
+    dot.style.cssText = 'display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:6px;vertical-align:middle;transition:background 0.3s;';
+    label.appendChild(dot);
+  }
+  dot.style.background = online ? '#48bb78' : '#fc8181';
+  dot.title = online ? `n8n connected · ${count} plugin(s)` : 'n8n offline or not reachable';
+}
+
 function reconcilePlugins(panels) {
-  const incomingIds = new Set(panels.map((p) => p.id));
+  // Accept panels that have id + label. 'builtin' trigger doesn't need a webhook.
+  const valid = panels.filter((p) => p.id && p.label && (p.webhook || p.trigger === 'builtin'));
+  const incomingIds = new Set(valid.map((p) => p.id));
   for (const [id] of pluginRegistry) { if (!incomingIds.has(id)) removePlugin(id); }
-  for (const panel of panels) {
-    if (!panel.id || !panel.label || !panel.webhook) continue;
+  for (const panel of valid) {
     if (!pluginRegistry.has(panel.id)) registerPlugin(panel);
   }
 }
@@ -147,13 +159,16 @@ function reconcilePlugins(panels) {
 function registerPlugin(plugin) {
   pluginRegistry.set(plugin.id, plugin);
   injectPluginLink(plugin);
-  injectPluginPanel(plugin);
+  // 'builtin' panels already exist in the HTML — don't inject a duplicate content panel
+  if (plugin.trigger !== 'builtin') injectPluginPanel(plugin);
 }
 
 function removePlugin(id) {
   pluginRegistry.delete(id);
   document.getElementById(`plugin-link-${id}`)?.remove();
-  document.getElementById(`${id}Panel`)?.remove();
+  // Never remove a builtin panel (e.g. live-consultPanel is in the HTML)
+  const panel = document.getElementById(`${id}Panel`);
+  if (panel && !panel.classList.contains('epic-builtin-panel')) panel.remove();
 }
 
 function injectPluginLink(plugin) {
@@ -161,7 +176,11 @@ function injectPluginLink(plugin) {
   const a = document.createElement('a');
   a.href = '#'; a.className = 'activity-item plugin-item';
   a.id = `plugin-link-${plugin.id}`; a.dataset.tab = plugin.id;
-  a.innerHTML = `${escapeHtml(plugin.label)} <span class="plugin-badge">n8n</span>`;
+  // Builtin panels get a distinct badge; others show n8n badge
+  const badge = plugin.trigger === 'builtin'
+    ? '<span class="plugin-badge" style="background:#2b7a0b;">live</span>'
+    : '<span class="plugin-badge">n8n</span>';
+  a.innerHTML = `${escapeHtml(plugin.label)} ${badge}`;
   a.addEventListener('click', (e) => { e.preventDefault(); switchTab(plugin.id); });
   elements.dynamicPluginLinks.appendChild(a);
 }
@@ -201,6 +220,8 @@ function runAutoPlugins() {
 async function runPlugin(pluginId) {
   const plugin = pluginRegistry.get(pluginId);
   if (!plugin || !selectedPatient) return;
+  // Builtin panels (live-consult) manage their own UI — never fire a webhook
+  if (plugin.trigger === 'builtin') { switchTab(pluginId); return; }
   const contentEl = document.getElementById(`${pluginId}Content`);
   if (!contentEl) return;
   contentEl.innerHTML = `<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Running ${escapeHtml(plugin.label)}…</p>`;
@@ -302,8 +323,6 @@ function selectPatient(patient) {
   elements.patientChartSection?.classList.remove('hidden');
   elements.patientBanner?.classList.remove('hidden');
   updatePatientBanner(patient);
-  elements.generateDischargeBtn.disabled = false;
-  elements.generatePrevisitBtn.disabled = false;
   updatePluginButtons(true);
   // Enable new feature buttons
   enableEntryButtons(true);
@@ -324,10 +343,6 @@ function clearPatient() {
   elements.patientListSection?.classList.remove('hidden');
   elements.patientBanner?.classList.add('hidden');
   elements.patientSearch.value = '';
-  elements.generateDischargeBtn.disabled = true;
-  elements.generatePrevisitBtn.disabled = true;
-  elements.dischargeContent.textContent = '';
-  elements.previsitContent.textContent = '';
   updatePluginButtons(false);
   enableEntryButtons(false);
   enableConsultButtons(false);
@@ -348,10 +363,40 @@ function updatePatientBanner(p) {
 }
 
 function switchTab(tabId) {
+  // Chart panels are inside patientChartSection — show it, or prompt to select a patient
+  const chartSection = elements.patientChartSection;
+  const panelEl = document.getElementById(`${tabId}Panel`);
+  if (panelEl && chartSection) {
+    if (chartSection.classList.contains('hidden')) {
+      if (!selectedPatient) {
+        // Show a temporary toast instead of silently failing
+        showNoPatientToast();
+        return;
+      }
+      chartSection.classList.remove('hidden');
+      elements.patientListSection?.classList.add('hidden');
+    }
+  }
   document.querySelectorAll('.activity-item').forEach((i) => i.classList.remove('active'));
   document.querySelectorAll('.epic-tab-panel').forEach((p) => p.classList.remove('active'));
   document.querySelector(`.activity-item[data-tab="${tabId}"]`)?.classList.add('active');
-  document.getElementById(`${tabId}Panel`)?.classList.add('active');
+  panelEl?.classList.add('active');
+}
+
+function showNoPatientToast() {
+  let toast = document.getElementById('noPatientToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'noPatientToast';
+    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);' +
+      'background:#2d3748;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;' +
+      'font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.3);pointer-events:none;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = '⚠ Please search for and select a patient first.';
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -583,29 +628,9 @@ function loadDemographics() {
   </div>`;
 }
 
-async function generateAISummary(type) {
-  const btn     = type === 'discharge' ? elements.generateDischargeBtn : elements.generatePrevisitBtn;
-  const content = type === 'discharge' ? elements.dischargeContent     : elements.previsitContent;
-  const webhook = type === 'discharge' ? 'discharge-summary'           : 'previsit-summary';
-  btn.disabled  = true;
-  content.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Generating…</p>';
-  try {
-    const res = await fetch(`${N8N_BASE}/webhook/${webhook}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patientId: selectedPatient.id, fhirBase: FHIR_BASE }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    const data = Array.isArray(raw) ? raw[0] : raw;
-    content.innerHTML = renderPluginResponse(data, { label: type });
-  } catch (err) {
-    content.innerHTML = `<div class="plugin-error">
-      <strong>Could not reach n8n workflow.</strong><br>
-      <small>Activate the <code>${webhook}</code> workflow at <a href="http://${window.location.hostname}:4014" target="_blank">localhost:4014</a></small>
-    </div>`;
-  } finally { btn.disabled = false; }
-}
+// generateAISummary() removed — discharge and pre-visit summaries are now
+// fully driven by n8n list-panels as plugin panels (trigger: "button").
+// To customise them, edit the n8n "list-panels" workflow response.
 
 // ═══════════════════════════════════════════════════════════════
 //  NEW FEATURE 1: MANUAL DATA ENTRY
@@ -642,6 +667,9 @@ function enableEntryButtons(on) {
     const el = document.getElementById(id);
     if (el) el.disabled = !on;
   });
+  // Dim Data Entry and PDF sidebar links when no patient selected
+  document.querySelectorAll('.activity-item[data-tab="manual-entry"], .activity-item[data-tab="pdf-upload"]')
+    .forEach((a) => { a.style.opacity = on ? '' : '0.45'; a.title = on ? '' : 'Select a patient first'; });
 }
 
 function showEntryFeedback(msg, type = 'success') {
@@ -680,7 +708,7 @@ async function saveLab() {
     document.getElementById('saveLab').disabled = true;
     await fhirPost('Observation', obs);
     showEntryFeedback(`✓ Lab result "${name}" saved (${new Date(date).toLocaleDateString()}).`);
-    loadLabs();
+    setTimeout(() => loadLabs(), 600);
   } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
   finally { document.getElementById('saveLab').disabled = false; }
 }
@@ -747,7 +775,7 @@ async function saveVitals() {
     document.getElementById('saveVitals').disabled = true;
     await Promise.all(saved);
     showEntryFeedback(`✓ ${saved.length} vital sign(s) saved (${new Date(effectiveDateTime).toLocaleDateString()}).`);
-    loadVitals();
+    setTimeout(() => loadVitals(), 600);
   } catch (err) { showEntryFeedback(`Failed to save vitals: ${err.message}`, 'error'); }
   finally { document.getElementById('saveVitals').disabled = false; }
 }
@@ -787,7 +815,7 @@ async function saveMedication() {
     document.getElementById('saveMed').disabled = true;
     await fhirPost('MedicationRequest', med);
     showEntryFeedback(`✓ Medication "${name}" saved.`);
-    loadMedications();
+    setTimeout(() => loadMedications(), 600);
   } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
   finally { document.getElementById('saveMed').disabled = false; }
 }
@@ -820,7 +848,7 @@ async function saveCondition() {
     document.getElementById('saveCond').disabled = true;
     await fhirPost('Condition', cond);
     showEntryFeedback(`✓ Condition "${name}" saved.`);
-    loadProblems(); loadOverview();
+    setTimeout(() => { loadProblems(); loadOverview(); }, 600);
   } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
   finally { document.getElementById('saveCond').disabled = false; }
 }
@@ -851,7 +879,7 @@ async function saveAllergyEntry() {
     document.getElementById('saveAllergy').disabled = true;
     await fhirPost('AllergyIntolerance', allergy);
     showEntryFeedback(`✓ Allergy to "${allergen}" saved.`);
-    loadAllergies();
+    setTimeout(() => loadAllergies(), 600);
   } catch (err) { showEntryFeedback(`Failed to save: ${err.message}`, 'error'); }
   finally { document.getElementById('saveAllergy').disabled = false; }
 }
@@ -953,8 +981,11 @@ async function processPdf() {
       body: JSON.stringify(payload), signal: AbortSignal.timeout(60000),
     });
 
-    if (!res.ok) throw new Error(`n8n returned HTTP ${res.status}`);
-    const raw = await res.json();
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`n8n returned HTTP ${res.status}${txt ? ': ' + txt.slice(0, 120) : ''}. Make sure the "process-report" webhook is active in n8n.`);
+    }
+    const raw = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response. Check that the process-report workflow is active and responding correctly.'); });
     const data = Array.isArray(raw) ? raw[0] : raw;
 
     msgEl.textContent = 'Rendering results...';
@@ -1060,16 +1091,54 @@ function fileToBase64(file) {
 //  7. Doctor reviews and clicks "Apply" to post resources to FHIR
 // ═══════════════════════════════════════════════════════════════
 
+// ─── CONSULT STATE ─────────────────────────────────────────────
 let consultState = {
-  active:        false,
-  currentSpeaker: 'doctor',  // 'doctor' | 'patient'
-  transcript:    [],          // [{speaker, text, time}]
-  recognition:   null,
-  timerInterval: null,
-  startTime:     null,
+  active:          false,
+  mode:            'speak',    // 'speak' | 'type'
+  currentSpeaker:  'patient',
+  transcript:      [],          // [{speaker, text, time}]
+  recognition:     null,
+  timerInterval:   null,
+  startTime:       null,
+  pendingChartUpdates: [],
+  aiThinking:      false,       // waiting for AI doctor n8n reply
 };
 
+// ── MODE SWITCHER ───────────────────────────────────────────────
+function initConsultModeBar() {
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (consultState.active) return; // lock mode during session
+      document.querySelectorAll('.mode-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      consultState.mode = btn.dataset.mode;
+      applyModeUI(consultState.mode);
+    });
+  });
+}
+
+function applyModeUI(mode) {
+  const isSpeak = mode === 'speak';
+  // Toggle button never needed — AI is always doctor
+  document.getElementById('toggleSpeakerBtn').style.display = 'none';
+  // Text input: shown in both modes but labelled differently
+  const lbl = document.getElementById('textFallbackLabel');
+  if (lbl) lbl.innerHTML = isSpeak
+    ? '&#9998; Patient: type a message (or just speak — mic is active):'
+    : '&#9998; Patient: type your message:';
+  const inp = document.getElementById('consultTextInput');
+  if (inp) inp.placeholder = isSpeak
+    ? 'Type or speak — mic is always listening…'
+    : 'Type patient\'s message and press Enter…';
+  // Doctor card always shows AI
+  document.getElementById('doctorAvatarLabel').textContent = '🤖';
+  document.getElementById('doctorCardName').textContent    = 'AI Virtual Doctor';
+  document.getElementById('doctorCardRole').textContent    = 'Powered by n8n + GPT-4o';
+}
+
+// ── INIT ────────────────────────────────────────────────────────
 function initLiveConsult() {
+  initConsultModeBar();
   document.getElementById('startConsultBtn')?.addEventListener('click', startConsultation);
   document.getElementById('toggleSpeakerBtn')?.addEventListener('click', toggleSpeaker);
   document.getElementById('endConsultBtn')?.addEventListener('click', endConsultation);
@@ -1083,7 +1152,6 @@ function initLiveConsult() {
   document.getElementById('saveNotesToFhirBtn')?.addEventListener('click', saveNotesToFhir);
   document.getElementById('copyNotesBtn')?.addEventListener('click', copyClinicalNotes);
 
-  // Text fallback
   const textInput = document.getElementById('consultTextInput');
   const addBtn    = document.getElementById('addTranscriptLineBtn');
   addBtn?.addEventListener('click', addTextLine);
@@ -1091,71 +1159,128 @@ function initLiveConsult() {
 }
 
 function enableConsultButtons(on) {
-  document.getElementById('startConsultBtn').disabled = !on;
+  const startBtn = document.getElementById('startConsultBtn');
+  if (startBtn) startBtn.disabled = !on;
+  if (!on) {
+    document.getElementById('generateClinicalNotesBtn').disabled = true;
+    document.getElementById('updateChartFromConsultBtn').disabled = true;
+    document.getElementById('consultTextInput').disabled = true;
+    document.getElementById('addTranscriptLineBtn').disabled = true;
+    if (consultState.active) {
+      consultState.active = false;
+      stopSpeechRecognition();
+      stopTimer();
+      window.speechSynthesis?.cancel();
+      setConsultStatus('idle', '● Idle');
+      document.getElementById('startConsultBtn').classList.remove('hidden');
+      document.getElementById('toggleSpeakerBtn')?.classList.add('hidden');
+      document.getElementById('endConsultBtn')?.classList.add('hidden');
+      document.getElementById('voiceWave')?.classList.add('hidden');
+      document.getElementById('currentSpeakerLabel').textContent = '';
+      document.getElementById('doctorMicStatus').className = 'mic-indicator off';
+      document.getElementById('patientMicStatus').className = 'mic-indicator off';
+      document.getElementById('aiDoctorBubble')?.classList.add('hidden');
+    }
+  }
 }
 
+// ── START / END ─────────────────────────────────────────────────
 function startConsultation() {
   if (!selectedPatient) return;
-  consultState.active        = true;
-  consultState.currentSpeaker = 'doctor';
-  consultState.transcript    = [];
-  consultState.startTime     = Date.now();
+  consultState.active         = true;
+  consultState.currentSpeaker = 'patient';
+  consultState.transcript     = [];
+  consultState.startTime      = Date.now();
+  consultState.aiThinking     = false;
+
+  // Lock mode buttons during session
+  document.querySelectorAll('.mode-btn').forEach((b) => b.disabled = true);
 
   setConsultStatus('recording', '● Recording');
   document.getElementById('startConsultBtn').classList.add('hidden');
-  document.getElementById('toggleSpeakerBtn').classList.remove('hidden');
   document.getElementById('endConsultBtn').classList.remove('hidden');
-  document.getElementById('toggleSpeakerBtn').disabled = false;
   document.getElementById('endConsultBtn').disabled = false;
   document.getElementById('consultTextInput').disabled = false;
   document.getElementById('addTranscriptLineBtn').disabled = false;
   document.getElementById('generateClinicalNotesBtn').disabled = false;
   document.getElementById('updateChartFromConsultBtn').disabled = false;
+  document.getElementById('clinicalNotesSection')?.classList.add('hidden');
+  document.getElementById('chartUpdatePreview')?.classList.add('hidden');
 
-  updateSpeakerUI();
+  // Both modes: AI is always the doctor
+  document.getElementById('doctorAvatarLabel').textContent = '🤖';
+  document.getElementById('doctorCardName').textContent    = 'AI Virtual Doctor';
+  document.getElementById('doctorCardRole').textContent    = 'Powered by n8n + GPT-4o';
+  document.getElementById('patientCard')?.classList.add('participant-active');
+  document.getElementById('patientMicStatus').className   = 'mic-indicator off';
+  document.getElementById('doctorMicStatus').className    = 'mic-indicator off';
+  document.getElementById('voiceWave').classList.remove('hidden');
+
+  if (consultState.mode === 'speak') {
+    // Patient speaks via mic — AI doctor listens and replies
+    document.getElementById('patientMicStatus').className = 'mic-indicator on';
+    document.getElementById('currentSpeakerLabel').textContent = '🧑 Patient speaking — AI Doctor will reply';
+    startSpeechRecognition('patient');
+  } else {
+    // Patient types — mic off, text box is the input
+    document.getElementById('currentSpeakerLabel').textContent = '🧑 Patient types below — AI Doctor will reply';
+  }
+
+  // AI doctor always sends the opening greeting
+  askVirtualDoctor('START_CONSULTATION');
+
   startTimer();
-  startSpeechRecognition();
   renderTranscript();
 }
 
 function toggleSpeaker() {
   consultState.currentSpeaker = consultState.currentSpeaker === 'doctor' ? 'patient' : 'doctor';
   updateSpeakerUI();
-  // Restart recognition with new speaker context
   stopSpeechRecognition();
-  startSpeechRecognition();
+  startSpeechRecognition(consultState.currentSpeaker);
 }
 
 function updateSpeakerUI() {
   const sp = consultState.currentSpeaker;
-  const label = sp === 'doctor' ? '🩺 Dr. Provider speaking' : '🧑 Patient speaking';
-  document.getElementById('currentSpeakerLabel').textContent = label;
+  document.getElementById('currentSpeakerLabel').textContent =
+    sp === 'doctor' ? '🩺 Dr. Provider speaking' : '🧑 Patient speaking';
   document.getElementById('toggleSpeakerBtn').textContent =
     sp === 'doctor' ? 'Switch to Patient' : 'Switch to Doctor';
-
   document.getElementById('doctorCard')?.classList.toggle('participant-active', sp === 'doctor');
   document.getElementById('patientCard')?.classList.toggle('participant-active', sp === 'patient');
   document.getElementById('doctorMicStatus').className = `mic-indicator ${sp === 'doctor' ? 'on' : 'off'}`;
   document.getElementById('patientMicStatus').className = `mic-indicator ${sp === 'patient' ? 'on' : 'off'}`;
-  document.getElementById('voiceWave').classList.toggle('hidden', false);
-
-  const speakerSelect = document.getElementById('textInputSpeaker');
-  if (speakerSelect) speakerSelect.value = sp;
+  document.getElementById('voiceWave').classList.remove('hidden');
+  const sel = document.getElementById('textInputSpeaker');
+  if (sel) sel.value = sp;
 }
 
 function endConsultation() {
   consultState.active = false;
   stopSpeechRecognition();
   stopTimer();
+  window.speechSynthesis?.cancel();
   setConsultStatus('done', '✓ Ended');
+
+  document.querySelectorAll('.mode-btn').forEach((b) => b.disabled = false);
   document.getElementById('startConsultBtn').classList.remove('hidden');
   document.getElementById('startConsultBtn').textContent = '🎙 New Consultation';
   document.getElementById('toggleSpeakerBtn').classList.add('hidden');
   document.getElementById('endConsultBtn').classList.add('hidden');
   document.getElementById('voiceWave').classList.add('hidden');
   document.getElementById('currentSpeakerLabel').textContent = 'Consultation ended';
+  document.getElementById('consultTextInput').disabled = true;
+  document.getElementById('addTranscriptLineBtn').disabled = true;
   document.getElementById('doctorMicStatus').className = 'mic-indicator off';
   document.getElementById('patientMicStatus').className = 'mic-indicator off';
+  document.getElementById('doctorCard')?.classList.remove('participant-active');
+  document.getElementById('patientCard')?.classList.remove('participant-active', 'listening-mode');
+  document.getElementById('aiDoctorBubble')?.classList.add('hidden');
+
+  if (consultState.transcript.length > 0) {
+    generateClinicalNotes();
+    extractChartUpdates();
+  }
 }
 
 function clearTranscript() {
@@ -1165,15 +1290,21 @@ function clearTranscript() {
   document.getElementById('chartUpdatePreview').classList.add('hidden');
 }
 
+// ── TEXT INPUT ──────────────────────────────────────────────────
 function addTextLine() {
   const input = document.getElementById('consultTextInput');
-  const text = input?.value?.trim();
+  const text  = input?.value?.trim();
   if (!text) return;
-  const speaker = document.getElementById('textInputSpeaker')?.value || consultState.currentSpeaker;
-  addTranscriptEntry(speaker, text);
+  // Text input is always patient in both modes
+  addTranscriptEntry('patient', text);
   if (input) input.value = '';
+  // Always trigger AI doctor reply
+  if (consultState.active && !consultState.aiThinking) {
+    askVirtualDoctor(text);
+  }
 }
 
+// ── TRANSCRIPT ──────────────────────────────────────────────────
 function addTranscriptEntry(speaker, text) {
   const entry = {
     speaker,
@@ -1188,21 +1319,117 @@ function renderTranscript() {
   const el = document.getElementById('consultTranscript');
   if (!el) return;
   if (!consultState.transcript.length) {
-    el.innerHTML = '<p class="no-data">Start a consultation to see the live transcript here...</p>';
+    el.innerHTML = '<p class="no-data">Start a consultation to see the live transcript here…</p>';
     return;
   }
-  el.innerHTML = consultState.transcript.map((entry) => `
-    <div class="transcript-line ${entry.speaker}">
-      <span class="transcript-speaker">${entry.speaker === 'doctor' ? '🩺 Dr. Provider' : '🧑 Patient'}</span>
+  el.innerHTML = consultState.transcript.map((entry) => {
+    const isAI = entry.speaker === 'ai-doctor';
+    const speakerLabel = isAI ? '🤖 AI Doctor' : entry.speaker === 'doctor' ? '🩺 Dr. Provider' : '🧑 Patient';
+    const cls = isAI ? 'ai-doctor' : entry.speaker;
+    return `<div class="transcript-line ${cls}">
+      <span class="transcript-speaker">${speakerLabel}</span>
       <span class="transcript-time">${entry.time}</span>
       <div class="transcript-text">${escapeHtml(entry.text)}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   el.scrollTop = el.scrollHeight;
 }
 
-function startSpeechRecognition() {
+// ── VIRTUAL DOCTOR ──────────────────────────────────────────────
+async function askVirtualDoctor(patientInput) {
+  if (!selectedPatient || consultState.aiThinking) return;
+  consultState.aiThinking = true;
+
+  // Show thinking bubble
+  const bubble   = document.getElementById('aiDoctorBubble');
+  const bubbleTxt = document.getElementById('aiDoctorText');
+  bubble.classList.remove('hidden');
+  bubble.classList.add('thinking');
+  bubbleTxt.textContent = 'Thinking…';
+
+  // Pause mic while AI is "speaking"
+  stopSpeechRecognition();
+
+  try {
+    const res = await fetch(`${N8N_BASE}/webhook/virtual-doctor-turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientId:     selectedPatient.id,
+        fhirBase:      FHIR_BASE,
+        patientName:   formatPatientName(selectedPatient),
+        patientInput,
+        transcript:    buildTranscriptText(),
+        rawTranscript: consultState.transcript,
+        today:         new Date().toISOString().split('T')[0],
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!res.ok) throw new Error(`n8n returned HTTP ${res.status}. Activate the "virtual-doctor-turn" webhook in n8n.`);
+    const raw  = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response. Check the virtual-doctor-turn workflow.'); });
+    const data = Array.isArray(raw) ? raw[0] : raw;
+    const reply = data.reply || data.text || "I didn't get a response. Please try again.";
+    const done  = data.done === true; // n8n signals consultation complete
+
+    // Show in bubble
+    bubble.classList.remove('thinking');
+    bubbleTxt.textContent = reply;
+
+    // Add to transcript
+    addTranscriptEntry('ai-doctor', reply);
+
+    // Speak the reply aloud
+    speakText(reply, () => {
+      consultState.aiThinking = false;
+      if (done) {
+        // AI has collected all info — auto-end
+        bubble.classList.add('hidden');
+        endConsultation();
+      } else if (consultState.active) {
+        // Resume listening to patient
+        startSpeechRecognition('patient');
+        document.getElementById('consultTextInput').disabled = false;
+        document.getElementById('addTranscriptLineBtn').disabled = false;
+      }
+    });
+
+  } catch (err) {
+    consultState.aiThinking = false;
+    bubble.classList.remove('thinking');
+    bubbleTxt.textContent = '⚠ Could not reach AI Doctor. Check n8n virtual-doctor-turn webhook.';
+    console.error('Virtual doctor error:', err);
+    // Resume mic anyway
+    if (consultState.active) startSpeechRecognition('patient');
+  }
+}
+
+function speakText(text, onDone) {
+  if (!window.speechSynthesis) { onDone?.(); return; }
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang  = 'en-US';
+  utt.rate  = 0.95;
+  utt.pitch = 1.05;
+  // Prefer a female voice for the AI doctor
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find((v) => v.lang.startsWith('en') && /female|zira|samantha|karen|victoria/i.test(v.name))
+    || voices.find((v) => v.lang.startsWith('en'));
+  if (preferred) utt.voice = preferred;
+  utt.onend   = () => onDone?.();
+  utt.onerror = () => onDone?.();
+  window.speechSynthesis.speak(utt);
+
+  // Safari/Chrome bug: synthesis can stall — watchdog
+  let started = false;
+  utt.onstart = () => { started = true; };
+  setTimeout(() => { if (!started) onDone?.(); }, 8000);
+}
+
+// ── SPEECH RECOGNITION ──────────────────────────────────────────
+function startSpeechRecognition(speakerOverride) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return; // Fallback to text input — no alert needed
+  if (!SpeechRecognition) return;
 
   const recognition = new SpeechRecognition();
   recognition.continuous     = true;
@@ -1210,14 +1437,23 @@ function startSpeechRecognition() {
   recognition.lang           = 'en-US';
 
   recognition.onresult = (event) => {
-    let interim = '';
-    let final   = '';
+    let final = '';
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += transcript;
-      else interim += transcript;
+      if (event.results[i].isFinal) final += event.results[i][0].transcript;
     }
-    if (final.trim()) addTranscriptEntry(consultState.currentSpeaker, final.trim());
+    if (!final.trim()) return;
+
+    const speaker = speakerOverride || consultState.currentSpeaker;
+    addTranscriptEntry(speaker, final.trim());
+
+    // Both modes: after patient speaks, get AI doctor reply
+    if (speaker === 'patient' && consultState.active && !consultState.aiThinking) {
+      // Pause mic so AI can reply without hearing itself
+      stopSpeechRecognition();
+      document.getElementById('consultTextInput').disabled = true;
+      document.getElementById('addTranscriptLineBtn').disabled = true;
+      askVirtualDoctor(final.trim());
+    }
   };
 
   recognition.onerror = (e) => {
@@ -1225,8 +1461,7 @@ function startSpeechRecognition() {
   };
 
   recognition.onend = () => {
-    // Auto-restart if still active
-    if (consultState.active) {
+    if (consultState.active && consultState.recognition === recognition && !consultState.aiThinking) {
       try { recognition.start(); } catch { /* ignore */ }
     }
   };
@@ -1244,6 +1479,7 @@ function stopSpeechRecognition() {
   consultState.recognition = null;
 }
 
+// ── TIMER ───────────────────────────────────────────────────────
 function startTimer() {
   const durationEl = document.getElementById('consultDuration');
   consultState.timerInterval = setInterval(() => {
@@ -1253,7 +1489,6 @@ function startTimer() {
     if (durationEl) durationEl.textContent = `${m}:${s}`;
   }, 1000);
 }
-
 function stopTimer() { clearInterval(consultState.timerInterval); }
 
 function setConsultStatus(cls, label) {
@@ -1264,34 +1499,34 @@ function setConsultStatus(cls, label) {
 }
 
 function buildTranscriptText() {
-  return consultState.transcript.map((e) =>
-    `[${e.time}] ${e.speaker === 'doctor' ? 'Doctor' : 'Patient'}: ${e.text}`
-  ).join('\n');
+  return consultState.transcript.map((e) => {
+    const label = e.speaker === 'ai-doctor' ? 'AI Doctor' : e.speaker === 'doctor' ? 'Doctor' : 'Patient';
+    return `[${e.time}] ${label}: ${e.text}`;
+  }).join('\n');
 }
 
+// ── CLINICAL NOTES ──────────────────────────────────────────────
 async function generateClinicalNotes() {
-  if (!selectedPatient || !consultState.transcript.length) {
-    alert('No transcript to generate notes from.'); return;
-  }
+  if (!selectedPatient || !consultState.transcript.length) return;
   const notesSection = document.getElementById('clinicalNotesSection');
   const notesContent = document.getElementById('clinicalNotesContent');
   notesSection.classList.remove('hidden');
-  notesContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Generating SOAP notes via n8n...</p>';
-
+  notesContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Generating SOAP notes via n8n…</p>';
   try {
     const res = await fetch(`${N8N_BASE}/webhook/generate-clinical-notes`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        patientId:    selectedPatient.id,
-        fhirBase:     FHIR_BASE,
-        patientName:  formatPatientName(selectedPatient),
-        transcript:   buildTranscriptText(),
+        patientId:     selectedPatient.id,
+        fhirBase:      FHIR_BASE,
+        patientName:   formatPatientName(selectedPatient),
+        transcript:    buildTranscriptText(),
         rawTranscript: consultState.transcript,
+        today:         new Date().toISOString().split('T')[0],
       }),
       signal: AbortSignal.timeout(45000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
+    const raw  = await res.json();
     const data = Array.isArray(raw) ? raw[0] : raw;
     notesContent.innerHTML = data.html
       ? `<div class="plugin-html-output">${data.html}</div>`
@@ -1305,29 +1540,28 @@ async function generateClinicalNotes() {
   }
 }
 
+// ── CHART UPDATES ───────────────────────────────────────────────
 async function extractChartUpdates() {
-  if (!selectedPatient || !consultState.transcript.length) {
-    alert('No transcript to extract updates from.'); return;
-  }
+  if (!selectedPatient || !consultState.transcript.length) return;
   const previewSection = document.getElementById('chartUpdatePreview');
   const previewContent = document.getElementById('chartUpdateContent');
   previewSection.classList.remove('hidden');
-  previewContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Extracting chart updates via n8n...</p>';
-
+  previewContent.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Extracting chart updates via n8n…</p>';
   try {
     const res = await fetch(`${N8N_BASE}/webhook/extract-chart-updates`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        patientId:    selectedPatient.id,
-        fhirBase:     FHIR_BASE,
-        patientName:  formatPatientName(selectedPatient),
-        transcript:   buildTranscriptText(),
+        patientId:     selectedPatient.id,
+        fhirBase:      FHIR_BASE,
+        patientName:   formatPatientName(selectedPatient),
+        transcript:    buildTranscriptText(),
         rawTranscript: consultState.transcript,
+        today:         new Date().toISOString().split('T')[0],
       }),
       signal: AbortSignal.timeout(45000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
+    const raw  = await res.json();
     const data = Array.isArray(raw) ? raw[0] : raw;
     consultState.pendingChartUpdates = data.resources || [];
     previewContent.innerHTML = data.html
@@ -1344,9 +1578,7 @@ async function extractChartUpdates() {
 
 async function applyConsultUpdates() {
   const resources = consultState.pendingChartUpdates;
-  if (!resources || !resources.length) {
-    showEntryFeedback('No FHIR resources to apply.', 'error'); return;
-  }
+  if (!resources?.length) { showEntryFeedback('No FHIR resources to apply.', 'error'); return; }
   document.getElementById('applyConsultUpdatesBtn').disabled = true;
   try {
     await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
@@ -1360,10 +1592,9 @@ async function applyConsultUpdates() {
 
 async function saveNotesToFhir() {
   if (!selectedPatient) return;
-  const notesEl = document.getElementById('clinicalNotesContent');
+  const notesEl   = document.getElementById('clinicalNotesContent');
   const notesText = notesEl?.innerText?.trim();
   if (!notesText) return;
-
   const docRef = {
     resourceType: 'DocumentReference',
     status: 'current',
@@ -1372,7 +1603,6 @@ async function saveNotesToFhir() {
     date: new Date().toISOString(),
     content: [{ attachment: { contentType: 'text/plain', data: btoa(unescape(encodeURIComponent(notesText))), title: 'Clinical Notes' } }],
   };
-
   document.getElementById('saveNotesToFhirBtn').disabled = true;
   try {
     await fhirPost('DocumentReference', docRef);
@@ -1382,11 +1612,10 @@ async function saveNotesToFhir() {
 }
 
 function copyClinicalNotes() {
-  const notesEl = document.getElementById('clinicalNotesContent');
-  const text = notesEl?.innerText?.trim();
+  const text = document.getElementById('clinicalNotesContent')?.innerText?.trim();
   if (!text) return;
   navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('copyNotesBtn');
+    const btn  = document.getElementById('copyNotesBtn');
     const orig = btn.textContent;
     btn.textContent = '✓ Copied!';
     setTimeout(() => { btn.textContent = orig; }, 2000);

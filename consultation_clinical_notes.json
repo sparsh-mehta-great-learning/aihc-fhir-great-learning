@@ -1,0 +1,44 @@
+{
+  "patientId": "1",
+  "patientName": "Koepp, Abdul",
+  "fhirBase": "http://r4:8080/hapi-fhir-jpaserver/fhir",
+  "today": "2026-03-28",
+  "transcript": "[03:46:02 PM] AI Doctor: Hello! What brings you in today?\n[03:46:13 PM] Patient: Regular checkup, and I want to update my cholesterol.\n[03:46:15 PM] AI Doctor: Of course. Can you tell me your most recent cholesterol reading?\n[03:46:27 PM] Patient: It was 170. Also my blood pressure was 122 over 78.\n[03:46:40 PM] AI Doctor: Thank you. Any current medications or new symptoms?\n[03:46:52 PM] Patient: I am on ibuprofen 400mg as needed. No new symptoms.\n[03:47:05 PM] AI Doctor: Understood. I have everything I need. Let me update your chart now. [CONSULTATION_COMPLETE]",
+  "rawTranscript": [
+    {
+      "speaker": "ai-doctor",
+      "time": "03:46:02 PM",
+      "text": "Hello! What brings you in today?"
+    },
+    {
+      "speaker": "patient",
+      "time": "03:46:13 PM",
+      "text": "Regular checkup, and I want to update my cholesterol."
+    },
+    {
+      "speaker": "ai-doctor",
+      "time": "03:46:15 PM",
+      "text": "Of course. Can you tell me your most recent cholesterol reading?"
+    },
+    {
+      "speaker": "patient",
+      "time": "03:46:27 PM",
+      "text": "It was 170. Also my blood pressure was 122 over 78."
+    },
+    {
+      "speaker": "ai-doctor",
+      "time": "03:46:40 PM",
+      "text": "Thank you. Any current medications or new symptoms?"
+    },
+    {
+      "speaker": "patient",
+      "time": "03:46:52 PM",
+      "text": "I am on ibuprofen 400mg as needed. No new symptoms."
+    },
+    {
+      "speaker": "ai-doctor",
+      "time": "03:47:05 PM",
+      "text": "Understood. I have everything I need. Let me update your chart now. [CONSULTATION_COMPLETE]"
+    }
+  ]
+}

@@ -1121,3 +1121,82 @@ html, body {
 
 /* Consult output areas */
 .consult-output { padding: 14px; background: var(--epic-white); min-height: 80px; }
+
+/* ── Virtual Doctor / Mode Bar ───────────────────────────────── */
+.consult-mode-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  background: var(--epic-gray-1);
+  border: 1px solid var(--epic-border);
+  border-radius: 10px;
+  padding: 6px;
+}
+.mode-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--epic-gray-4);
+  transition: all 0.18s;
+  line-height: 1.2;
+}
+.mode-btn:hover { background: var(--epic-white); color: var(--epic-text); }
+.mode-btn.active {
+  background: var(--epic-white);
+  border-color: var(--epic-purple);
+  color: var(--epic-purple);
+  box-shadow: 0 1px 4px rgba(92,45,145,0.12);
+}
+.mode-btn[data-mode="virtual"].active { border-color: #2b7a0b; color: #2b7a0b; }
+.mode-desc { font-size: 10px; font-weight: 400; color: var(--epic-gray-4); }
+.mode-btn.active .mode-desc { color: inherit; opacity: 0.75; }
+
+/* ── AI Doctor Bubble ─────────────────────────────────────────── */
+.ai-doctor-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: linear-gradient(135deg, #f0fff4, #e6ffed);
+  border: 1.5px solid #68d391;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  animation: fadeSlideIn 0.25s ease;
+}
+.ai-doctor-bubble.thinking .ai-bubble-text::after {
+  content: '▋';
+  animation: blink 0.8s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes fadeSlideIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:none} }
+.ai-bubble-avatar {
+  font-size: 26px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ai-bubble-text {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #22543d;
+  font-weight: 500;
+}
+
+/* ── Virtual mode transcript tweak ───────────────────────────── */
+.transcript-line.ai-doctor .transcript-speaker { color: #2b7a0b; }
+.transcript-line.ai-doctor .transcript-text { border-color: #68d391; }
+
+/* ── Speaking indicator on patient card in virtual mode ──────── */
+.participant-card.listening-mode {
+  border-color: #68d391;
+  background: rgba(104,211,145,0.06);
+}

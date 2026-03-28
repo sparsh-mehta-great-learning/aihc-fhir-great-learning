@@ -1,0 +1,9 @@
+{
+  "patientId": "1",
+  "patientName": "Koepp, Abdul",
+  "fhirBase": "http://r4:8080/hapi-fhir-jpaserver/fhir",
+  "today": "2026-03-28",
+  "patientInput": "START_CONSULTATION",
+  "transcript": "",
+  "rawTranscript": []
+}

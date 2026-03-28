@@ -1,0 +1,20 @@
+{
+  "patientId": "1",
+  "patientName": "Koepp, Abdul",
+  "fhirBase": "http://r4:8080/hapi-fhir-jpaserver/fhir",
+  "today": "2026-03-28",
+  "patientInput": "I want to update my cholesterol to 170.",
+  "transcript": "[03:46:02 PM] AI Doctor: Hello! What brings you in today?\n[03:46:13 PM] Patient: I want to update my cholesterol to 170.",
+  "rawTranscript": [
+    {
+      "speaker": "ai-doctor",
+      "time": "03:46:02 PM",
+      "text": "Hello! What brings you in today?"
+    },
+    {
+      "speaker": "patient",
+      "time": "03:46:13 PM",
+      "text": "I want to update my cholesterol to 170."
+    }
+  ]
+}

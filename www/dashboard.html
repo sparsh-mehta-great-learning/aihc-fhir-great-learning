@@ -77,18 +77,14 @@
                 <a href="#" class="activity-item" data-tab="pdf-upload">&#128196; Upload Report PDF</a>
             </div>
 
-            <!-- EXISTING: AI Features (kept as-is, plus Live Consultation) -->
+            <!-- AI Features — all sidebar links injected dynamically from n8n list-panels -->
             <div class="activity-section activity-ai" id="aiSection">
                 <div class="activity-label">
                     AI Features
                     <span class="ai-label">n8n</span>
                     <button type="button" id="refreshPluginsBtn" class="plugin-refresh-btn" title="Refresh registered plugins">&#8635;</button>
                 </div>
-                <a href="#" class="activity-item" data-tab="discharge">Discharge Summary</a>
-                <a href="#" class="activity-item" data-tab="previsit">Pre-visit Summary</a>
-                <!-- NEW: Live Consultation -->
-                <a href="#" class="activity-item" data-tab="live-consult">&#127897; Live Consultation</a>
-                <!-- Dynamic plugin sidebar links (Risk Score, Care Gaps, etc.) injected here -->
+                <!-- No hardcoded links here. n8n list-panels drives every entry -->
                 <div id="dynamicPluginLinks"></div>
                 <div id="pluginStatus" class="plugin-status"></div>
             </div>
@@ -155,26 +151,9 @@
                         <div id="demographicsContent" class="epic-data-content"></div>
                     </div>
 
-                    <!-- ── EXISTING AI PANELS ── -->
-                    <div id="dischargePanel" class="epic-tab-panel epic-ai-panel">
-                        <div class="panel-header">
-                            <h2>Discharge Summary <span class="ai-badge">Gen AI</span></h2>
-                            <p class="panel-subtitle">AI-generated discharge summary via n8n workflow</p>
-                        </div>
-                        <button type="button" id="generateDischargeBtn" class="epic-btn epic-btn-primary" disabled>Generate Discharge Summary</button>
-                        <div id="dischargeContent" class="epic-data-content epic-ai-output"></div>
-                    </div>
-
-                    <div id="previsitPanel" class="epic-tab-panel epic-ai-panel">
-                        <div class="panel-header">
-                            <h2>Pre-visit Summary <span class="ai-badge">Gen AI</span></h2>
-                            <p class="panel-subtitle">AI-generated pre-visit summary via n8n workflow</p>
-                        </div>
-                        <button type="button" id="generatePrevisitBtn" class="epic-btn epic-btn-primary" disabled>Generate Pre-visit Summary</button>
-                        <div id="previsitContent" class="epic-data-content epic-ai-output"></div>
-                    </div>
-
-                    <!-- Dynamic plugin panels (Risk Score, Care Gaps, etc.) injected here by JS -->
+                    <!-- All AI panels (Discharge, Pre-visit, Risk Score, Care Gaps, etc.)
+                         are injected here dynamically by JS from n8n list-panels.
+                         To add a new feature: add it in n8n — no HTML changes needed. -->
                     <div id="dynamicPanelContainer"></div>
 
                     <!-- ══════════════════════════════════════
@@ -429,13 +408,13 @@
                     </div>
 
                     <!-- ══════════════════════════════════════
-                         NEW FEATURE 3: LIVE CONSULTATION
+                         LIVE CONSULTATION + VIRTUAL DOCTOR
                     ══════════════════════════════════════ -->
-                    <div id="live-consultPanel" class="epic-tab-panel epic-ai-panel">
+                    <div id="live-consultPanel" class="epic-tab-panel epic-ai-panel epic-builtin-panel">
                         <div class="panel-header panel-header-flex">
                             <div>
                                 <h2>Live Consultation <span class="ai-badge">Real-time AI</span></h2>
-                                <p class="panel-subtitle">Doctor and patient speak live on the dashboard. Conversation is transcribed in real-time, chart is updated automatically, and clinical notes are generated as a SOAP summary.</p>
+                                <p class="panel-subtitle">Speak live or use Virtual Doctor mode — the AI asks clinical questions, transcribes the conversation, then updates the chart automatically.</p>
                             </div>
                             <div class="consult-session-meta">
                                 <span id="consultStatus" class="consult-status-badge idle">&#9679; Idle</span>
@@ -443,17 +422,29 @@
                             </div>
                         </div>
 
+                        <!-- Mode Selector -->
+                        <div class="consult-mode-bar">
+                            <button type="button" id="modeManualBtn" class="mode-btn active" data-mode="speak">
+                                &#127897; Patient Speaks
+                                <span class="mode-desc">AI Doctor listens &amp; responds</span>
+                            </button>
+                            <button type="button" id="modeVirtualBtn" class="mode-btn" data-mode="type">
+                                &#9998; Patient Types
+                                <span class="mode-desc">AI Doctor reads &amp; responds</span>
+                            </button>
+                        </div>
+
                         <!-- Participants -->
                         <div class="consult-participants">
                             <div class="participant-card" id="doctorCard">
-                                <div class="participant-avatar doctor">Dr</div>
+                                <div class="participant-avatar doctor" id="doctorAvatarLabel">Dr</div>
                                 <div class="participant-info">
-                                    <div class="participant-name">Dr. Provider</div>
-                                    <div class="participant-role">Physician</div>
+                                    <div class="participant-name" id="doctorCardName">Dr. Provider</div>
+                                    <div class="participant-role" id="doctorCardRole">Physician</div>
                                 </div>
                                 <div id="doctorMicStatus" class="mic-indicator off">&#127897;</div>
                             </div>
-                            <div class="participant-vs">vs</div>
+                            <div class="participant-vs">&#8644;</div>
                             <div class="participant-card" id="patientCard">
                                 <div class="participant-avatar patient">Pt</div>
                                 <div class="participant-info">
@@ -464,13 +455,19 @@
                             </div>
                         </div>
 
+                        <!-- AI Doctor status bubble (Virtual mode only) -->
+                        <div id="aiDoctorBubble" class="ai-doctor-bubble hidden">
+                            <div class="ai-bubble-avatar">&#129302;</div>
+                            <div id="aiDoctorText" class="ai-bubble-text">Thinking…</div>
+                        </div>
+
                         <!-- Consultation Controls -->
                         <div class="consult-controls">
                             <button type="button" id="startConsultBtn" class="epic-btn epic-btn-primary" disabled>
                                 &#127897; Start Consultation
                             </button>
                             <button type="button" id="toggleSpeakerBtn" class="epic-btn epic-btn-secondary hidden">
-                                Switch Speaker
+                                Switch to Patient
                             </button>
                             <button type="button" id="endConsultBtn" class="epic-btn epic-btn-danger hidden">
                                 &#9209; End &amp; Generate Notes
@@ -483,18 +480,14 @@
                             </div>
                         </div>
 
-                        <!-- Manual text input (simulates speech for demo/no-mic environments) -->
+                        <!-- Text input — patient types here in 'type' mode; mic used in 'speak' mode -->
                         <div class="consult-text-fallback">
                             <div class="fallback-label">
-                                <span>&#9998; Type to simulate speech (no mic required):</span>
-                                <select id="textInputSpeaker">
-                                    <option value="doctor">Doctor speaking</option>
-                                    <option value="patient">Patient speaking</option>
-                                </select>
+                                <span id="textFallbackLabel">&#9998; Patient: type your message:</span>
                             </div>
                             <div class="fallback-input-row">
-                                <input type="text" id="consultTextInput" placeholder="Type what's being said and press Enter or Add..." disabled>
-                                <button type="button" id="addTranscriptLineBtn" class="epic-btn epic-btn-secondary" disabled>Add</button>
+                                <input type="text" id="consultTextInput" placeholder="Type patient's message and press Enter…" disabled>
+                                <button type="button" id="addTranscriptLineBtn" class="epic-btn epic-btn-secondary" disabled>Send</button>
                             </div>
                         </div>
 
@@ -505,7 +498,7 @@
                                 <button type="button" id="clearTranscriptBtn" class="mini-action-btn">Clear</button>
                             </div>
                             <div id="consultTranscript" class="consult-transcript">
-                                <p class="no-data">Start a consultation to see the live transcript here...</p>
+                                <p class="no-data">Start a consultation to see the live transcript here…</p>
                             </div>
                         </div>
 
@@ -529,9 +522,9 @@
                             </div>
                         </div>
 
-                        <!-- Chart Update Preview from Conversation -->
+                        <!-- Chart Update Preview -->
                         <div id="chartUpdatePreview" class="consult-block hidden">
-                            <div class="consult-block-label">Suggested Chart Updates from Conversation</div>
+                            <div class="consult-block-label">Suggested Chart Updates</div>
                             <div id="chartUpdateContent" class="consult-output epic-ai-output"></div>
                             <div class="entry-actions" style="margin-top:12px;">
                                 <button type="button" id="applyConsultUpdatesBtn" class="epic-btn epic-btn-primary">&#10003; Apply Updates to Chart</button>
