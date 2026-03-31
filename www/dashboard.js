@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initManualEntry();
   initPdfUpload();
   initLiveConsult();
+  hideAIFeatures();
 });
 
 function setCurrentDate() {
@@ -132,7 +133,6 @@ async function pollPluginRegistry(manual = false) {
 }
 
 function setN8nConnectionStatus(online, count) {
-  // Show a subtle status dot in the AI Features section label
   const label = document.querySelector('#aiSection .activity-label');
   if (!label) return;
   let dot = document.getElementById('n8nStatusDot');
@@ -147,8 +147,15 @@ function setN8nConnectionStatus(online, count) {
 }
 
 function reconcilePlugins(panels) {
-  // Accept panels that have id + label. 'builtin' trigger doesn't need a webhook.
-  const valid = panels.filter((p) => p.id && p.label && (p.webhook || p.trigger === 'builtin'));
+  // Filter panels — respect patientPrefix to show/hide per patient type
+  const valid = panels.filter((p) => {
+    if (!p.id || !p.label || (!p.webhook && p.trigger !== 'builtin')) return false;
+    if (p.patientPrefix) {
+      if (!selectedPatient) return false;
+      return selectedPatient.id?.startsWith(p.patientPrefix);
+    }
+    return true;
+  });
   const incomingIds = new Set(valid.map((p) => p.id));
   for (const [id] of pluginRegistry) { if (!incomingIds.has(id)) removePlugin(id); }
   for (const panel of valid) {
@@ -159,14 +166,12 @@ function reconcilePlugins(panels) {
 function registerPlugin(plugin) {
   pluginRegistry.set(plugin.id, plugin);
   injectPluginLink(plugin);
-  // 'builtin' panels already exist in the HTML — don't inject a duplicate content panel
   if (plugin.trigger !== 'builtin') injectPluginPanel(plugin);
 }
 
 function removePlugin(id) {
   pluginRegistry.delete(id);
   document.getElementById(`plugin-link-${id}`)?.remove();
-  // Never remove a builtin panel (e.g. live-consultPanel is in the HTML)
   const panel = document.getElementById(`${id}Panel`);
   if (panel && !panel.classList.contains('epic-builtin-panel')) panel.remove();
 }
@@ -176,7 +181,6 @@ function injectPluginLink(plugin) {
   const a = document.createElement('a');
   a.href = '#'; a.className = 'activity-item plugin-item';
   a.id = `plugin-link-${plugin.id}`; a.dataset.tab = plugin.id;
-  // Builtin panels get a distinct badge; others show n8n badge
   const badge = plugin.trigger === 'builtin'
     ? '<span class="plugin-badge" style="background:#2b7a0b;">live</span>'
     : '<span class="plugin-badge">n8n</span>';
@@ -220,7 +224,6 @@ function runAutoPlugins() {
 async function runPlugin(pluginId) {
   const plugin = pluginRegistry.get(pluginId);
   if (!plugin || !selectedPatient) return;
-  // Builtin panels (live-consult) manage their own UI — never fire a webhook
   if (plugin.trigger === 'builtin') { switchTab(pluginId); return; }
   const contentEl = document.getElementById(`${pluginId}Content`);
   if (!contentEl) return;
@@ -272,6 +275,18 @@ function setPluginStatus(msg, type = 'ok') {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  AI FEATURES VISIBILITY
+// ═══════════════════════════════════════════════════════════════
+
+function hideAIFeatures() {
+  document.getElementById('aiSection')?.classList.add('hidden');
+}
+
+function showAIFeatures() {
+  document.getElementById('aiSection')?.classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ORIGINAL: PATIENT MANAGEMENT
 // ═══════════════════════════════════════════════════════════════
 
@@ -283,8 +298,8 @@ async function fetchAndRenderPatients(query) {
   showLoading(true);
   try {
     const url = query
-      ? `${FHIR_BASE}/Patient?_count=20&name=${encodeURIComponent(query)}`
-      : `${FHIR_BASE}/Patient?_count=20`;
+      ? `${FHIR_BASE}/Patient?_count=1000&name=${encodeURIComponent(query)}`
+      : `${FHIR_BASE}/Patient?_count=1000`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const bundle = await response.json();
@@ -324,14 +339,14 @@ function selectPatient(patient) {
   elements.patientBanner?.classList.remove('hidden');
   updatePatientBanner(patient);
   updatePluginButtons(true);
-  // Enable new feature buttons
   enableEntryButtons(true);
   enableConsultButtons(true);
   document.getElementById('processPdfBtn').disabled = !currentPdfFile;
-  // Update consult patient name
   document.getElementById('consultPatientName').textContent = formatPatientName(patient);
   loadAllergies(); loadOverview(); loadMedications(); loadLabs();
   loadProblems(); loadVitals(); loadDemographics();
+  showAIFeatures();
+  pollPluginRegistry();
   runAutoPlugins();
   switchTab('allergies');
 }
@@ -346,6 +361,7 @@ function clearPatient() {
   updatePluginButtons(false);
   enableEntryButtons(false);
   enableConsultButtons(false);
+  hideAIFeatures();
   for (const [id] of pluginRegistry) {
     const el = document.getElementById(`${id}Content`);
     if (el) el.innerHTML = '<p class="no-data">Select a patient to use this feature.</p>';
@@ -363,13 +379,11 @@ function updatePatientBanner(p) {
 }
 
 function switchTab(tabId) {
-  // Chart panels are inside patientChartSection — show it, or prompt to select a patient
   const chartSection = elements.patientChartSection;
   const panelEl = document.getElementById(`${tabId}Panel`);
   if (panelEl && chartSection) {
     if (chartSection.classList.contains('hidden')) {
       if (!selectedPatient) {
-        // Show a temporary toast instead of silently failing
         showNoPatientToast();
         return;
       }
@@ -628,19 +642,11 @@ function loadDemographics() {
   </div>`;
 }
 
-// generateAISummary() removed — discharge and pre-visit summaries are now
-// fully driven by n8n list-panels as plugin panels (trigger: "button").
-// To customise them, edit the n8n "list-panels" workflow response.
-
 // ═══════════════════════════════════════════════════════════════
 //  NEW FEATURE 1: MANUAL DATA ENTRY
-//  Posts FHIR resources directly. "Keep previous" means we don't
-//  overwrite existing FHIR observations — we post a new entry
-//  only for the fields actually filled in.
 // ═══════════════════════════════════════════════════════════════
 
 function initManualEntry() {
-  // Type tab switching
   document.querySelectorAll('.entry-type-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.entry-type-btn').forEach((b) => b.classList.remove('active'));
@@ -650,11 +656,9 @@ function initManualEntry() {
     });
   });
 
-  // Set default datetime to now
   const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   ['lab-date','vital-date'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = nowLocal; });
 
-  // Save buttons
   document.getElementById('saveLab')?.addEventListener('click', saveLab);
   document.getElementById('saveVitals')?.addEventListener('click', saveVitals);
   document.getElementById('saveMed')?.addEventListener('click', saveMedication);
@@ -667,7 +671,6 @@ function enableEntryButtons(on) {
     const el = document.getElementById(id);
     if (el) el.disabled = !on;
   });
-  // Dim Data Entry and PDF sidebar links when no patient selected
   document.querySelectorAll('.activity-item[data-tab="manual-entry"], .activity-item[data-tab="pdf-upload"]')
     .forEach((a) => { a.style.opacity = on ? '' : '0.45'; a.title = on ? '' : 'Select a patient first'; });
 }
@@ -730,11 +733,11 @@ async function saveVitals() {
   });
 
   const vitalsMap = [
-    { id: 'vital-hr',     loinc: '8867-4',  name: 'Heart Rate',         unit: '/min' },
-    { id: 'vital-spo2',   loinc: '2708-6',  name: 'Oxygen Saturation',  unit: '%' },
-    { id: 'vital-rr',     loinc: '9279-1',  name: 'Respiratory Rate',   unit: '/min' },
-    { id: 'vital-weight', loinc: '29463-7', name: 'Body Weight',        unitId: 'vital-weight-unit' },
-    { id: 'vital-height', loinc: '8302-2',  name: 'Body Height',        unitId: 'vital-height-unit' },
+    { id: 'vital-hr',     loinc: '8867-4',  name: 'Heart Rate',        unit: '/min' },
+    { id: 'vital-spo2',   loinc: '2708-6',  name: 'Oxygen Saturation', unit: '%' },
+    { id: 'vital-rr',     loinc: '9279-1',  name: 'Respiratory Rate',  unit: '/min' },
+    { id: 'vital-weight', loinc: '29463-7', name: 'Body Weight',       unitId: 'vital-weight-unit' },
+    { id: 'vital-height', loinc: '8302-2',  name: 'Body Height',       unitId: 'vital-height-unit' },
   ];
 
   for (const v of vitalsMap) {
@@ -744,14 +747,12 @@ async function saveVitals() {
     saved.push(fhirPost('Observation', buildObs(v.loinc, v.name, val, unit)));
   }
 
-  // Temperature
   const temp = document.getElementById('vital-temp')?.value?.trim();
   if (temp) {
     const tu = document.getElementById('vital-temp-unit')?.value === 'C' ? 'Cel' : '[degF]';
     saved.push(fhirPost('Observation', buildObs('8310-5', 'Body Temperature', temp, tu)));
   }
 
-  // Blood Pressure (panel)
   const bpSys = document.getElementById('vital-bp-sys')?.value?.trim();
   const bpDia = document.getElementById('vital-bp-dia')?.value?.trim();
   if (bpSys || bpDia) {
@@ -886,15 +887,6 @@ async function saveAllergyEntry() {
 
 // ═══════════════════════════════════════════════════════════════
 //  NEW FEATURE 2: PDF REPORT UPLOAD VIA n8n
-//  Sends PDF as base64 to n8n webhook: process-report
-//  n8n extracts values; missing fields keep previous FHIR value
-//
-//  n8n webhook expected at: POST /webhook/process-report
-//  Payload:  { patientId, fhirBase, pdfBase64, filename,
-//              reportType, keepPrevious, showDates }
-//  Response: { extracted: [{name,value,unit,date,isNew},...],
-//              summary: "...", reportDate: "...",
-//              resources: [...FHIR resources to POST...] }
 // ═══════════════════════════════════════════════════════════════
 
 let currentPdfFile = null;
@@ -915,7 +907,6 @@ function initPdfUpload() {
     pdfExtractedData = null;
   });
 
-  // Drag & drop
   dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone?.addEventListener('drop', (e) => {
@@ -985,7 +976,7 @@ async function processPdf() {
       const txt = await res.text().catch(() => '');
       throw new Error(`n8n returned HTTP ${res.status}${txt ? ': ' + txt.slice(0, 120) : ''}. Make sure the "process-report" webhook is active in n8n.`);
     }
-    const raw = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response. Check that the process-report workflow is active and responding correctly.'); });
+    const raw = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response.'); });
     const data = Array.isArray(raw) ? raw[0] : raw;
 
     msgEl.textContent = 'Rendering results...';
@@ -1017,10 +1008,8 @@ function renderPdfResult(data) {
     data.summary    ? data.summary : '',
   ].filter(Boolean).join(' · ');
 
-  // If n8n returned pre-rendered HTML
   if (data.html) { contentEl.innerHTML = data.html; resultEl.classList.remove('hidden'); return; }
 
-  // If n8n returned structured extracted fields
   if (data.extracted && Array.isArray(data.extracted)) {
     const showDates = document.getElementById('pdfShowDates').checked;
     contentEl.innerHTML = `
@@ -1041,7 +1030,6 @@ function renderPdfResult(data) {
     return;
   }
 
-  // Fallback
   contentEl.innerHTML = renderPluginResponse(data, {});
   resultEl.classList.remove('hidden');
 }
@@ -1057,7 +1045,6 @@ async function applyPdfResult() {
   try {
     await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
     showEntryFeedback(`✓ ${resources.length} resource(s) from PDF applied to chart.`);
-    // Reload affected tabs
     loadLabs(); loadVitals(); loadMedications(); loadProblems(); loadAllergies();
     document.getElementById('pdfResult').classList.add('hidden');
   } catch (err) { showEntryFeedback(`Failed to apply: ${err.message}`, 'error'); }
@@ -1075,40 +1062,24 @@ function fileToBase64(file) {
 
 // ═══════════════════════════════════════════════════════════════
 //  NEW FEATURE 3: LIVE DOCTOR–PATIENT CONSULTATION
-//
-//  Flow:
-//  1. Doctor clicks "Start Consultation"
-//  2. Speaker toggles between Doctor / Patient
-//  3. Web Speech API transcribes each speaker's input
-//     (falls back to manual text input if no mic / API unavailable)
-//  4. Transcript builds up with speaker labels + timestamps
-//  5. "Generate Clinical Notes" → POST /webhook/generate-clinical-notes
-//     Receives: { patientId, fhirBase, transcript, patientName }
-//     Returns:  { html } or { text } with SOAP note
-//  6. "Extract & Update Chart" → POST /webhook/extract-chart-updates
-//     Receives: { patientId, fhirBase, transcript, patientName }
-//     Returns:  { html, resources: [...FHIR...] }
-//  7. Doctor reviews and clicks "Apply" to post resources to FHIR
 // ═══════════════════════════════════════════════════════════════
 
-// ─── CONSULT STATE ─────────────────────────────────────────────
 let consultState = {
   active:          false,
-  mode:            'speak',    // 'speak' | 'type'
+  mode:            'speak',
   currentSpeaker:  'patient',
-  transcript:      [],          // [{speaker, text, time}]
+  transcript:      [],
   recognition:     null,
   timerInterval:   null,
   startTime:       null,
   pendingChartUpdates: [],
-  aiThinking:      false,       // waiting for AI doctor n8n reply
+  aiThinking:      false,
 };
 
-// ── MODE SWITCHER ───────────────────────────────────────────────
 function initConsultModeBar() {
   document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      if (consultState.active) return; // lock mode during session
+      if (consultState.active) return;
       document.querySelectorAll('.mode-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       consultState.mode = btn.dataset.mode;
@@ -1119,9 +1090,7 @@ function initConsultModeBar() {
 
 function applyModeUI(mode) {
   const isSpeak = mode === 'speak';
-  // Toggle button never needed — AI is always doctor
   document.getElementById('toggleSpeakerBtn').style.display = 'none';
-  // Text input: shown in both modes but labelled differently
   const lbl = document.getElementById('textFallbackLabel');
   if (lbl) lbl.innerHTML = isSpeak
     ? '&#9998; Patient: type a message (or just speak — mic is active):'
@@ -1130,13 +1099,11 @@ function applyModeUI(mode) {
   if (inp) inp.placeholder = isSpeak
     ? 'Type or speak — mic is always listening…'
     : 'Type patient\'s message and press Enter…';
-  // Doctor card always shows AI
   document.getElementById('doctorAvatarLabel').textContent = '🤖';
   document.getElementById('doctorCardName').textContent    = 'AI Virtual Doctor';
   document.getElementById('doctorCardRole').textContent    = 'Powered by n8n + GPT-4o';
 }
 
-// ── INIT ────────────────────────────────────────────────────────
 function initLiveConsult() {
   initConsultModeBar();
   document.getElementById('startConsultBtn')?.addEventListener('click', startConsultation);
@@ -1184,7 +1151,6 @@ function enableConsultButtons(on) {
   }
 }
 
-// ── START / END ─────────────────────────────────────────────────
 function startConsultation() {
   if (!selectedPatient) return;
   consultState.active         = true;
@@ -1193,7 +1159,6 @@ function startConsultation() {
   consultState.startTime      = Date.now();
   consultState.aiThinking     = false;
 
-  // Lock mode buttons during session
   document.querySelectorAll('.mode-btn').forEach((b) => b.disabled = true);
 
   setConsultStatus('recording', '● Recording');
@@ -1207,7 +1172,6 @@ function startConsultation() {
   document.getElementById('clinicalNotesSection')?.classList.add('hidden');
   document.getElementById('chartUpdatePreview')?.classList.add('hidden');
 
-  // Both modes: AI is always the doctor
   document.getElementById('doctorAvatarLabel').textContent = '🤖';
   document.getElementById('doctorCardName').textContent    = 'AI Virtual Doctor';
   document.getElementById('doctorCardRole').textContent    = 'Powered by n8n + GPT-4o';
@@ -1217,18 +1181,14 @@ function startConsultation() {
   document.getElementById('voiceWave').classList.remove('hidden');
 
   if (consultState.mode === 'speak') {
-    // Patient speaks via mic — AI doctor listens and replies
     document.getElementById('patientMicStatus').className = 'mic-indicator on';
     document.getElementById('currentSpeakerLabel').textContent = '🧑 Patient speaking — AI Doctor will reply';
     startSpeechRecognition('patient');
   } else {
-    // Patient types — mic off, text box is the input
     document.getElementById('currentSpeakerLabel').textContent = '🧑 Patient types below — AI Doctor will reply';
   }
 
-  // AI doctor always sends the opening greeting
   askVirtualDoctor('START_CONSULTATION');
-
   startTimer();
   renderTranscript();
 }
@@ -1290,21 +1250,17 @@ function clearTranscript() {
   document.getElementById('chartUpdatePreview').classList.add('hidden');
 }
 
-// ── TEXT INPUT ──────────────────────────────────────────────────
 function addTextLine() {
   const input = document.getElementById('consultTextInput');
   const text  = input?.value?.trim();
   if (!text) return;
-  // Text input is always patient in both modes
   addTranscriptEntry('patient', text);
   if (input) input.value = '';
-  // Always trigger AI doctor reply
   if (consultState.active && !consultState.aiThinking) {
     askVirtualDoctor(text);
   }
 }
 
-// ── TRANSCRIPT ──────────────────────────────────────────────────
 function addTranscriptEntry(speaker, text) {
   const entry = {
     speaker,
@@ -1335,19 +1291,16 @@ function renderTranscript() {
   el.scrollTop = el.scrollHeight;
 }
 
-// ── VIRTUAL DOCTOR ──────────────────────────────────────────────
 async function askVirtualDoctor(patientInput) {
   if (!selectedPatient || consultState.aiThinking) return;
   consultState.aiThinking = true;
 
-  // Show thinking bubble
-  const bubble   = document.getElementById('aiDoctorBubble');
+  const bubble    = document.getElementById('aiDoctorBubble');
   const bubbleTxt = document.getElementById('aiDoctorText');
   bubble.classList.remove('hidden');
   bubble.classList.add('thinking');
   bubbleTxt.textContent = 'Thinking…';
 
-  // Pause mic while AI is "speaking"
   stopSpeechRecognition();
 
   try {
@@ -1367,27 +1320,21 @@ async function askVirtualDoctor(patientInput) {
     });
 
     if (!res.ok) throw new Error(`n8n returned HTTP ${res.status}. Activate the "virtual-doctor-turn" webhook in n8n.`);
-    const raw  = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response. Check the virtual-doctor-turn workflow.'); });
+    const raw  = await res.json().catch(() => { throw new Error('n8n returned a non-JSON response.'); });
     const data = Array.isArray(raw) ? raw[0] : raw;
     const reply = data.reply || data.text || "I didn't get a response. Please try again.";
-    const done  = data.done === true; // n8n signals consultation complete
+    const done  = data.done === true;
 
-    // Show in bubble
     bubble.classList.remove('thinking');
     bubbleTxt.textContent = reply;
-
-    // Add to transcript
     addTranscriptEntry('ai-doctor', reply);
 
-    // Speak the reply aloud
     speakText(reply, () => {
       consultState.aiThinking = false;
       if (done) {
-        // AI has collected all info — auto-end
         bubble.classList.add('hidden');
         endConsultation();
       } else if (consultState.active) {
-        // Resume listening to patient
         startSpeechRecognition('patient');
         document.getElementById('consultTextInput').disabled = false;
         document.getElementById('addTranscriptLineBtn').disabled = false;
@@ -1399,7 +1346,6 @@ async function askVirtualDoctor(patientInput) {
     bubble.classList.remove('thinking');
     bubbleTxt.textContent = '⚠ Could not reach AI Doctor. Check n8n virtual-doctor-turn webhook.';
     console.error('Virtual doctor error:', err);
-    // Resume mic anyway
     if (consultState.active) startSpeechRecognition('patient');
   }
 }
@@ -1411,7 +1357,6 @@ function speakText(text, onDone) {
   utt.lang  = 'en-US';
   utt.rate  = 0.95;
   utt.pitch = 1.05;
-  // Prefer a female voice for the AI doctor
   const voices = window.speechSynthesis.getVoices();
   const preferred = voices.find((v) => v.lang.startsWith('en') && /female|zira|samantha|karen|victoria/i.test(v.name))
     || voices.find((v) => v.lang.startsWith('en'));
@@ -1419,14 +1364,11 @@ function speakText(text, onDone) {
   utt.onend   = () => onDone?.();
   utt.onerror = () => onDone?.();
   window.speechSynthesis.speak(utt);
-
-  // Safari/Chrome bug: synthesis can stall — watchdog
   let started = false;
   utt.onstart = () => { started = true; };
   setTimeout(() => { if (!started) onDone?.(); }, 8000);
 }
 
-// ── SPEECH RECOGNITION ──────────────────────────────────────────
 function startSpeechRecognition(speakerOverride) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) return;
@@ -1446,9 +1388,7 @@ function startSpeechRecognition(speakerOverride) {
     const speaker = speakerOverride || consultState.currentSpeaker;
     addTranscriptEntry(speaker, final.trim());
 
-    // Both modes: after patient speaks, get AI doctor reply
     if (speaker === 'patient' && consultState.active && !consultState.aiThinking) {
-      // Pause mic so AI can reply without hearing itself
       stopSpeechRecognition();
       document.getElementById('consultTextInput').disabled = true;
       document.getElementById('addTranscriptLineBtn').disabled = true;
@@ -1479,7 +1419,6 @@ function stopSpeechRecognition() {
   consultState.recognition = null;
 }
 
-// ── TIMER ───────────────────────────────────────────────────────
 function startTimer() {
   const durationEl = document.getElementById('consultDuration');
   consultState.timerInterval = setInterval(() => {
@@ -1505,7 +1444,6 @@ function buildTranscriptText() {
   }).join('\n');
 }
 
-// ── CLINICAL NOTES ──────────────────────────────────────────────
 async function generateClinicalNotes() {
   if (!selectedPatient || !consultState.transcript.length) return;
   const notesSection = document.getElementById('clinicalNotesSection');
@@ -1540,7 +1478,6 @@ async function generateClinicalNotes() {
   }
 }
 
-// ── CHART UPDATES ───────────────────────────────────────────────
 async function extractChartUpdates() {
   if (!selectedPatient || !consultState.transcript.length) return;
   const previewSection = document.getElementById('chartUpdatePreview');
