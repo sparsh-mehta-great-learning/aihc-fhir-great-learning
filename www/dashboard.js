@@ -298,8 +298,8 @@ async function fetchAndRenderPatients(query) {
   showLoading(true);
   try {
     const url = query
-      ? `${FHIR_BASE}/Patient?_count=1000&name=${encodeURIComponent(query)}`
-      : `${FHIR_BASE}/Patient?_count=1000`;
+      ? `${FHIR_BASE}/Patient?_count=20&name=${encodeURIComponent(query)}`
+      : `${FHIR_BASE}/Patient?_count=20`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const bundle = await response.json();
