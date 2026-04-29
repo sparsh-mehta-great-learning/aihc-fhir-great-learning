@@ -153,34 +153,36 @@
     },
     {
       "parameters": {
-        "promptType": "define",
-        "text": "={{ 'Generate a discharge summary from the following FHIR patient data:\\n\\n' + $json.context }}",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
         "options": {
-          "systemMessage": "You are a clinical documentation specialist. Write a professional hospital discharge summary in clear clinical language. Structure the summary with these clearly labeled sections: REASON FOR ADMISSION, HOSPITAL COURSE, SIGNIFICANT FINDINGS (vitals and labs), DISCHARGE MEDICATIONS, ALLERGIES, FOLLOW-UP INSTRUCTIONS, and DISCHARGE CONDITION. Be concise and clinically accurate. Do not invent information not present in the data."
-        }
+          "temperature": 0
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical documentation specialist. Write a professional hospital discharge summary in clear clinical language. Structure the summary with these clearly labeled sections: REASON FOR ADMISSION, HOSPITAL COURSE, SIGNIFICANT FINDINGS (vitals and labs), DISCHARGE MEDICATIONS, ALLERGIES, FOLLOW-UP INSTRUCTIONS, and DISCHARGE CONDITION. Be concise and clinically accurate. Do not invent information not present in the data."
+            },
+            {
+              "content": "={{ 'Generate a discharge summary from the following FHIR patient data:\\n\\n' + $json.context }}"
+            }
+          ]
+        },
+        "builtInTools": {}
       },
-      "id": "6281caeb-2073-4e3e-a9af-5e71dcad9046",
-      "name": "DS: AI Agent",
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 2,
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
       "position": [
-        7072,
+        7000,
         4240
-      ]
-    },
-    {
-      "parameters": {
-        "model": "gpt-4o",
-        "options": {}
-      },
-      "id": "734d990a-26fd-473b-b778-7c1ff46e24fb",
-      "name": "DS: OpenAI Chat Model",
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1,
-      "position": [
-        7152,
-        4464
       ],
+      "id": "6281caeb-2073-4e3e-a9af-5e71dcad9046",
+      "name": "DS: Generate with AI",
       "credentials": {
         "openAiApi": {
           "id": "Tux6taY8c9lUxahV",
@@ -190,14 +192,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// === FORMAT AI OUTPUT AS HTML ===\nconst input = $input.first().json;\nlet text = '';\n\ntry {\n  text = input.output || '';\n} catch { text = ''; }\n\nif (!text) {\n  return [{ json: { html: \"<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>Error:</strong> No AI response received. Check your OpenAI credentials.</div>\" } }];\n}\n\nconst lines = text.split('\\n');\nlet html = '<div style=\"font-family:system-ui,sans-serif;line-height:1.6\">';\nhtml += '<div style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#1e40af\">AI-generated content based on FHIR patient record. Review before clinical use.</div>';\n\nfor (const line of lines) {\n  const trimmed = line.trim();\n  if (!trimmed) { html += '<br>'; continue; }\n  if (/^[A-Z][A-Z \\/(\\\\-]{4,}:?$/.test(trimmed) || (trimmed.startsWith('**') && trimmed.endsWith('**'))) {\n    const label = trimmed.replace(/^\\*\\*|\\*\\*$/g, '').replace(/:$/, '');\n    html += `<div style=\"margin-top:16px;margin-bottom:6px;font-size:13px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e0e7ff;padding-bottom:4px\">${label}</div>`;\n  } else if (trimmed.startsWith('- ') || trimmed.startsWith('\\u2022 ')) {\n    html += `<div style=\"padding:3px 0 3px 14px;border-left:3px solid #dbeafe;margin:2px 0;font-size:13px;color:#1e293b\">${trimmed.substring(2)}</div>`;\n  } else {\n    html += `<p style=\"margin:4px 0;font-size:13px;color:#1e293b\">${trimmed}</p>`;\n  }\n}\nhtml += '</div>';\n\nreturn [{ json: { html } }];"
+        "jsCode": "// === FORMAT AI OUTPUT AS HTML ===\n// Handles output from the 'Message a model' OpenAI node.\n// The output can come in several shapes depending on the model version.\n\nconst input = $input.first().json;\nlet text = '';\n\ntry {\n  const output = input.output;\n  if (typeof output === 'string') {\n    text = output;\n  } else if (Array.isArray(output)) {\n    for (const msg of output) {\n      if (Array.isArray(msg?.content)) {\n        for (const block of msg.content) {\n          if (block?.type === 'output_text' && block?.text) text += block.text;\n        }\n      } else if (typeof msg?.text === 'string') {\n        text += msg.text;\n      }\n    }\n  } else if (typeof output === 'object' && output !== null) {\n    if (Array.isArray(output?.content)) {\n      for (const block of output.content) {\n        if (block?.type === 'output_text' && block?.text) text += block.text;\n      }\n    } else if (typeof output?.text === 'string') {\n      text = output.text;\n    }\n  }\n  if (!text) text = input.text || input.message || input.content || '';\n} catch (e) { text = ''; }\n\nif (!text) {\n  return [{ json: { html: \"<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>Error:</strong> No AI response received. Check your OpenAI credentials.</div>\" } }];\n}\n\nconst lines = text.split('\\n');\nlet html = '<div style=\"font-family:system-ui,sans-serif;line-height:1.6\">';\nhtml += '<div style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#1e40af\">AI-generated content based on FHIR patient record. Review before clinical use.</div>';\n\nfor (const line of lines) {\n  const trimmed = line.trim();\n  if (!trimmed) { html += '<br>'; continue; }\n  if (/^[A-Z][A-Z \\/(\\\\-]{4,}:?$/.test(trimmed) || (trimmed.startsWith('**') && trimmed.endsWith('**'))) {\n    const label = trimmed.replace(/^\\*\\*|\\*\\*$/g, '').replace(/:$/, '');\n    html += `<div style=\"margin-top:16px;margin-bottom:6px;font-size:13px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e0e7ff;padding-bottom:4px\">${label}</div>`;\n  } else if (trimmed.startsWith('- ') || trimmed.startsWith('\\u2022 ') || /^\\d+\\./.test(trimmed)) {\n    const item = trimmed.replace(/^[-\\u2022]\\s+/, '').replace(/^\\d+\\.\\s*/, '');\n    html += `<div style=\"padding:3px 0 3px 14px;border-left:3px solid #dbeafe;margin:2px 0;font-size:13px;color:#1e293b\">${item}</div>`;\n  } else {\n    html += `<p style=\"margin:4px 0;font-size:13px;color:#1e293b\">${trimmed}</p>`;\n  }\n}\nhtml += '</div>';\n\nreturn [{ json: { html } }];"
       },
       "id": "c594008c-8033-4f69-8c11-afaa5da60b87",
       "name": "DS: Format HTML",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        7472,
+        7240,
         4240
       ]
     },
@@ -212,7 +214,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        7712,
+        7480,
         4240
       ]
     }
@@ -310,30 +312,19 @@
       "main": [
         [
           {
-            "node": "DS: AI Agent",
+            "node": "DS: Generate with AI",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "DS: AI Agent": {
+    "DS: Generate with AI": {
       "main": [
         [
           {
             "node": "DS: Format HTML",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "DS: OpenAI Chat Model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "DS: AI Agent",
-            "type": "ai_languageModel",
             "index": 0
           }
         ]
