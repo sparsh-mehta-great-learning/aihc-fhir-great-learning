@@ -19,7 +19,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ panels: [{\"id\": \"my-feature\", \"label\": \"My Feature\", \"title\": \"My Custom AI Feature\", \"description\": \"Your AI-powered clinical feature (customize the prompt to make it yours)\", \"webhook\": \"my-feature-run\", \"trigger\": \"button\", \"buttonLabel\": \"Run My Feature\"}] }) }}",
+        "responseBody": "={{ JSON.stringify({ panels: [{\"id\": \"discharge-summary\", \"label\": \"Discharge Summary\", \"title\": \"AI Discharge Summary\", \"description\": \"AI-generated discharge summary from patient record\", \"webhook\": \"discharge-summary-run\", \"trigger\": \"button\", \"buttonLabel\": \"Generate Discharge Summary\"}] }) }}",
         "options": {}
       },
       "id": "78f78f63-0c0b-4cb5-a8fa-1df7a03d89b8",
@@ -34,19 +34,19 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "my-feature-run",
+        "path": "discharge-summary-run",
         "responseMode": "responseNode",
         "options": {}
       },
       "id": "1ffaedd2-ca92-4eed-9461-257adbbe4672",
-      "name": "POST /my-feature-run",
+      "name": "POST /discharge-summary-run",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [
         5072,
         4240
       ],
-      "webhookId": "my-feature-run"
+      "webhookId": "discharge-summary-run"
     },
     {
       "parameters": {
@@ -54,7 +54,7 @@
         "options": {}
       },
       "id": "066e86c7-7a67-4ec9-a9bc-93dd46011528",
-      "name": "MY: Fetch Patient",
+      "name": "DS: Fetch Patient",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -65,11 +65,11 @@
     },
     {
       "parameters": {
-        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Condition?patient=' + ($('POST /my-feature-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Condition?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
         "options": {}
       },
       "id": "b4b22db8-acee-4463-b0f4-e04aaec0f999",
-      "name": "MY: Fetch Conditions",
+      "name": "DS: Fetch Conditions",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -80,11 +80,11 @@
     },
     {
       "parameters": {
-        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/MedicationRequest?patient=' + ($('POST /my-feature-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/MedicationRequest?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
         "options": {}
       },
       "id": "0dda9e99-697f-46af-add0-07bdb3e58b37",
-      "name": "MY: Fetch Medications",
+      "name": "DS: Fetch Medications",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -95,11 +95,11 @@
     },
     {
       "parameters": {
-        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /my-feature-run').first().json.body.patientId || '') + '&category=vital-signs&_count=100&_sort=-date&_format=json' }}",
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&category=vital-signs&_count=100&_sort=-date&_format=json' }}",
         "options": {}
       },
       "id": "85cd91b2-66f7-40d6-b529-db6fab577d04",
-      "name": "MY: Fetch Vitals",
+      "name": "DS: Fetch Vitals",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -110,11 +110,11 @@
     },
     {
       "parameters": {
-        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /my-feature-run').first().json.body.patientId || '') + '&category=laboratory&_count=20&_sort=-date&_format=json' }}",
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&category=laboratory&_count=20&_sort=-date&_format=json' }}",
         "options": {}
       },
       "id": "4c45b346-7eb4-45df-876c-4eb08e623ca2",
-      "name": "MY: Fetch Labs",
+      "name": "DS: Fetch Labs",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -125,11 +125,11 @@
     },
     {
       "parameters": {
-        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/AllergyIntolerance?patient=' + ($('POST /my-feature-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/AllergyIntolerance?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
         "options": {}
       },
       "id": "2b7aeac9-ddc6-4861-a359-7cbeb182ba47",
-      "name": "MY: Fetch Allergies",
+      "name": "DS: Fetch Allergies",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
       "position": [
@@ -140,10 +140,10 @@
     },
     {
       "parameters": {
-        "jsCode": "// === ASSEMBLE CONTEXT ===\n// Collects all fetched FHIR data into one text block for the AI.\n//\n// TO CUSTOMIZE:\n// - If you add/remove Fetch nodes, update the parseB() calls below\n// - Node names inside parseB('...') must exactly match your node names\n// - Add/remove sections in the context string at the bottom\n\nconst parseB = (nodeName) => {\n  try {\n    const raw = $(nodeName).first()?.json;\n    const target = raw?.data || raw?.body || raw;\n    return (typeof target === 'string' ? JSON.parse(target) : target || {});\n  } catch (e) { return {}; }\n};\n\n// === UPDATE THESE NODE NAMES IF YOU RENAMED THEM ===\nconst patient   = parseB('MY: Fetch Patient');\nconst condB     = parseB('MY: Fetch Conditions');\nconst medB      = parseB('MY: Fetch Medications');\nconst vitalB    = parseB('MY: Fetch Vitals');\nconst labB      = parseB('MY: Fetch Labs');\nconst allergyB  = parseB('MY: Fetch Allergies');\n\n// Helpers\nconst fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '\\u2014';\nconst getName  = (p) => {\n  const n = p?.name?.[0];\n  return n ? [n.family, ...(n.given||[])].filter(Boolean).join(', ') : 'Unknown';\n};\nconst getAge = (bd) => {\n  if (!bd) return '?';\n  const t = new Date(); const d = new Date(bd);\n  let a = t.getFullYear() - d.getFullYear();\n  if (t.getMonth() - d.getMonth() < 0 || (t.getMonth() - d.getMonth() === 0 && t.getDate() < d.getDate())) a--;\n  return a;\n};\nconst getObs = (obs) => obs.valueQuantity ? `${obs.valueQuantity.value?.toFixed(1)} ${obs.valueQuantity.unit || ''}`.trim() : (obs.valueString || '\\u2014');\n\nconst conditions  = (condB.entry || []).map(e => e.resource).map(c => `${c.code?.text || c.code?.coding?.[0]?.display || '?'} (${c.clinicalStatus?.coding?.[0]?.code || '?'})`);\nconst medications = (medB.entry || []).map(e => e.resource).map(m => `${m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display || '?'} - ${m.status || '?'}`);\nconst vitals      = (vitalB.entry || []).slice(0, 10).map(e => e.resource).map(v => `${v.code?.text || '?'}: ${getObs(v)} (${fmtDate(v.effectiveDateTime)})`);\nconst labs        = (labB.entry || []).slice(0, 10).map(e => e.resource).map(l => `${l.code?.text || l.code?.coding?.[0]?.display || '?'}: ${getObs(l)} (${fmtDate(l.effectiveDateTime || l.issued)})`);\nconst allergies   = (allergyB.entry || []).map(e => e.resource).map(a => `${a.code?.text || a.code?.coding?.[0]?.display || '?'} (${a.criticality || '\\u2014'})`);\n\nconst patientInfo = `Name: ${getName(patient)} | DOB: ${patient.birthDate || '?'} | Age: ${getAge(patient.birthDate)} | Gender: ${patient.gender || '?'} | MRN: ${patient.id || '?'}`;\n\n// === CUSTOMIZE THESE SECTIONS FOR YOUR FEATURE ===\nconst context = [\n  `PATIENT: ${patientInfo}`,\n  `\\nACTIVE CONDITIONS (${conditions.length}):\\n${conditions.join('\\n') || 'None recorded'}`,\n  `\\nMEDICATIONS (${medications.length}):\\n${medications.join('\\n') || 'None recorded'}`,\n  `\\nALLERGIES (${allergies.length}):\\n${allergies.join('\\n') || 'NKDA'}`,\n  `\\nRECENT VITALS:\\n${vitals.join('\\n') || 'None recorded'}`,\n  `\\nRECENT LAB RESULTS:\\n${labs.join('\\n') || 'None recorded'}`,\n].join('\\n');\n\nreturn [{ json: { context, patientName: getName(patient) } }];"
+        "jsCode": "// === ASSEMBLE CONTEXT ===\n// Collects all fetched FHIR data into one text block for the AI.\n//\n// WHEN YOU COPY THIS FOR YOUR OWN FEATURE:\n// 1. Update the parseB('DS: ...') names to match YOUR node names\n// 2. Add/remove sections in the context string at the bottom\n\nconst parseB = (nodeName) => {\n  try {\n    const raw = $(nodeName).first()?.json;\n    const target = raw?.data || raw?.body || raw;\n    return (typeof target === 'string' ? JSON.parse(target) : target || {});\n  } catch (e) { return {}; }\n};\n\nconst patient   = parseB('DS: Fetch Patient');\nconst condB     = parseB('DS: Fetch Conditions');\nconst medB      = parseB('DS: Fetch Medications');\nconst vitalB    = parseB('DS: Fetch Vitals');\nconst labB      = parseB('DS: Fetch Labs');\nconst allergyB  = parseB('DS: Fetch Allergies');\n\nconst fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '\\u2014';\nconst getName  = (p) => {\n  const n = p?.name?.[0];\n  return n ? [n.family, ...(n.given||[])].filter(Boolean).join(', ') : 'Unknown';\n};\nconst getAge = (bd) => {\n  if (!bd) return '?';\n  const t = new Date(); const d = new Date(bd);\n  let a = t.getFullYear() - d.getFullYear();\n  if (t.getMonth() - d.getMonth() < 0 || (t.getMonth() - d.getMonth() === 0 && t.getDate() < d.getDate())) a--;\n  return a;\n};\nconst getObs = (obs) => obs.valueQuantity ? `${obs.valueQuantity.value?.toFixed(1)} ${obs.valueQuantity.unit || ''}`.trim() : (obs.valueString || '\\u2014');\n\nconst conditions  = (condB.entry || []).map(e => e.resource).map(c => `${c.code?.text || c.code?.coding?.[0]?.display || '?'} (${c.clinicalStatus?.coding?.[0]?.code || '?'})`);\nconst medications = (medB.entry || []).map(e => e.resource).map(m => `${m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display || '?'} - ${m.status || '?'}`);\nconst vitals      = (vitalB.entry || []).slice(0, 10).map(e => e.resource).map(v => `${v.code?.text || '?'}: ${getObs(v)} (${fmtDate(v.effectiveDateTime)})`);\nconst labs        = (labB.entry || []).slice(0, 10).map(e => e.resource).map(l => `${l.code?.text || l.code?.coding?.[0]?.display || '?'}: ${getObs(l)} (${fmtDate(l.effectiveDateTime || l.issued)})`);\nconst allergies   = (allergyB.entry || []).map(e => e.resource).map(a => `${a.code?.text || a.code?.coding?.[0]?.display || '?'} (${a.criticality || '\\u2014'})`);\n\nconst patientInfo = `Name: ${getName(patient)} | DOB: ${patient.birthDate || '?'} | Age: ${getAge(patient.birthDate)} | Gender: ${patient.gender || '?'} | MRN: ${patient.id || '?'}`;\n\nconst context = [\n  `PATIENT: ${patientInfo}`,\n  `\\nACTIVE CONDITIONS (${conditions.length}):\\n${conditions.join('\\n') || 'None recorded'}`,\n  `\\nMEDICATIONS (${medications.length}):\\n${medications.join('\\n') || 'None recorded'}`,\n  `\\nALLERGIES (${allergies.length}):\\n${allergies.join('\\n') || 'NKDA'}`,\n  `\\nRECENT VITALS:\\n${vitals.join('\\n') || 'None recorded'}`,\n  `\\nRECENT LAB RESULTS:\\n${labs.join('\\n') || 'None recorded'}`,\n].join('\\n');\n\nreturn [{ json: { context, patientName: getName(patient) } }];"
       },
       "id": "a913f193-1f38-417c-810d-24b1d104643a",
-      "name": "MY: Assemble Context",
+      "name": "DS: Assemble Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -154,13 +154,13 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ 'Generate output from the following FHIR patient data:\\n\\n' + $json.context }}",
+        "text": "={{ 'Generate a discharge summary from the following FHIR patient data:\\n\\n' + $json.context }}",
         "options": {
-          "systemMessage": ">>> REPLACE THIS PROMPT <<<\n\nYou are a clinical AI assistant. Your job is to [DESCRIBE YOUR FEATURE HERE].\n\nStructure your output with clearly labeled sections.\nBe concise and clinically accurate.\nDo not invent information not present in the data."
+          "systemMessage": "You are a clinical documentation specialist. Write a professional hospital discharge summary in clear clinical language. Structure the summary with these clearly labeled sections: REASON FOR ADMISSION, HOSPITAL COURSE, SIGNIFICANT FINDINGS (vitals and labs), DISCHARGE MEDICATIONS, ALLERGIES, FOLLOW-UP INSTRUCTIONS, and DISCHARGE CONDITION. Be concise and clinically accurate. Do not invent information not present in the data."
         }
       },
       "id": "6281caeb-2073-4e3e-a9af-5e71dcad9046",
-      "name": "MY: AI Agent",
+      "name": "DS: AI Agent",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 2,
       "position": [
@@ -174,7 +174,7 @@
         "options": {}
       },
       "id": "734d990a-26fd-473b-b778-7c1ff46e24fb",
-      "name": "MY: OpenAI Chat Model",
+      "name": "DS: OpenAI Chat Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1,
       "position": [
@@ -193,7 +193,7 @@
         "jsCode": "// === FORMAT AI OUTPUT AS HTML ===\nconst input = $input.first().json;\nlet text = '';\n\ntry {\n  text = input.output || '';\n} catch { text = ''; }\n\nif (!text) {\n  return [{ json: { html: \"<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>Error:</strong> No AI response received. Check your OpenAI credentials.</div>\" } }];\n}\n\nconst lines = text.split('\\n');\nlet html = '<div style=\"font-family:system-ui,sans-serif;line-height:1.6\">';\nhtml += '<div style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#1e40af\">AI-generated content based on FHIR patient record. Review before clinical use.</div>';\n\nfor (const line of lines) {\n  const trimmed = line.trim();\n  if (!trimmed) { html += '<br>'; continue; }\n  if (/^[A-Z][A-Z \\/(\\\\-]{4,}:?$/.test(trimmed) || (trimmed.startsWith('**') && trimmed.endsWith('**'))) {\n    const label = trimmed.replace(/^\\*\\*|\\*\\*$/g, '').replace(/:$/, '');\n    html += `<div style=\"margin-top:16px;margin-bottom:6px;font-size:13px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e0e7ff;padding-bottom:4px\">${label}</div>`;\n  } else if (trimmed.startsWith('- ') || trimmed.startsWith('\\u2022 ')) {\n    html += `<div style=\"padding:3px 0 3px 14px;border-left:3px solid #dbeafe;margin:2px 0;font-size:13px;color:#1e293b\">${trimmed.substring(2)}</div>`;\n  } else {\n    html += `<p style=\"margin:4px 0;font-size:13px;color:#1e293b\">${trimmed}</p>`;\n  }\n}\nhtml += '</div>';\n\nreturn [{ json: { html } }];"
       },
       "id": "c594008c-8033-4f69-8c11-afaa5da60b87",
-      "name": "MY: Format HTML",
+      "name": "DS: Format HTML",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -208,7 +208,7 @@
         "options": {}
       },
       "id": "8b23adb1-e718-43bb-b4b5-7add1dfb8711",
-      "name": "MY: Respond",
+      "name": "DS: Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
@@ -229,121 +229,121 @@
         ]
       ]
     },
-    "POST /my-feature-run": {
+    "POST /discharge-summary-run": {
       "main": [
         [
           {
-            "node": "MY: Fetch Patient",
+            "node": "DS: Fetch Patient",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Patient": {
+    "DS: Fetch Patient": {
       "main": [
         [
           {
-            "node": "MY: Fetch Conditions",
+            "node": "DS: Fetch Conditions",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Conditions": {
+    "DS: Fetch Conditions": {
       "main": [
         [
           {
-            "node": "MY: Fetch Medications",
+            "node": "DS: Fetch Medications",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Medications": {
+    "DS: Fetch Medications": {
       "main": [
         [
           {
-            "node": "MY: Fetch Vitals",
+            "node": "DS: Fetch Vitals",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Vitals": {
+    "DS: Fetch Vitals": {
       "main": [
         [
           {
-            "node": "MY: Fetch Labs",
+            "node": "DS: Fetch Labs",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Labs": {
+    "DS: Fetch Labs": {
       "main": [
         [
           {
-            "node": "MY: Fetch Allergies",
+            "node": "DS: Fetch Allergies",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Fetch Allergies": {
+    "DS: Fetch Allergies": {
       "main": [
         [
           {
-            "node": "MY: Assemble Context",
+            "node": "DS: Assemble Context",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Assemble Context": {
+    "DS: Assemble Context": {
       "main": [
         [
           {
-            "node": "MY: AI Agent",
+            "node": "DS: AI Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: AI Agent": {
+    "DS: AI Agent": {
       "main": [
         [
           {
-            "node": "MY: Format HTML",
+            "node": "DS: Format HTML",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "MY: OpenAI Chat Model": {
+    "DS: OpenAI Chat Model": {
       "ai_languageModel": [
         [
           {
-            "node": "MY: AI Agent",
+            "node": "DS: AI Agent",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "MY: Format HTML": {
+    "DS: Format HTML": {
       "main": [
         [
           {
-            "node": "MY: Respond",
+            "node": "DS: Respond",
             "type": "main",
             "index": 0
           }
