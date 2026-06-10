@@ -1,0 +1,350 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6beef382-e3f1-489d-b539-e879cae7ebf6",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        5072,
+        3840
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ panels: [{\"id\": \"discharge-summary\", \"label\": \"Discharge Summary\", \"title\": \"AI Discharge Summary\", \"description\": \"AI-generated discharge summary from patient record\", \"webhook\": \"discharge-summary-run\", \"trigger\": \"button\", \"buttonLabel\": \"Generate Discharge Summary\"}] }) }}",
+        "options": {}
+      },
+      "id": "78f78f63-0c0b-4cb5-a8fa-1df7a03d89b8",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        5312,
+        3840
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "discharge-summary-run",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1ffaedd2-ca92-4eed-9461-257adbbe4672",
+      "name": "POST /discharge-summary-run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        5072,
+        4240
+      ],
+      "webhookId": "discharge-summary-run"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Patient/' + ($json.body.patientId || '') + '?_format=json' }}",
+        "options": {}
+      },
+      "id": "066e86c7-7a67-4ec9-a9bc-93dd46011528",
+      "name": "DS: Fetch Patient",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        5312,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Condition?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "b4b22db8-acee-4463-b0f4-e04aaec0f999",
+      "name": "DS: Fetch Conditions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        5552,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/MedicationRequest?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "0dda9e99-697f-46af-add0-07bdb3e58b37",
+      "name": "DS: Fetch Medications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        5792,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&category=vital-signs&_count=100&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "85cd91b2-66f7-40d6-b529-db6fab577d04",
+      "name": "DS: Fetch Vitals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        6032,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&category=laboratory&_count=20&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "4c45b346-7eb4-45df-876c-4eb08e623ca2",
+      "name": "DS: Fetch Labs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        6272,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/AllergyIntolerance?patient=' + ($('POST /discharge-summary-run').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "2b7aeac9-ddc6-4861-a359-7cbeb182ba47",
+      "name": "DS: Fetch Allergies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        6512,
+        4240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === ASSEMBLE CONTEXT ===\n// Collects all fetched FHIR data into one text block for the AI.\n//\n// WHEN YOU COPY THIS FOR YOUR OWN FEATURE:\n// 1. Update the parseB('DS: ...') names to match YOUR node names\n// 2. Add/remove sections in the context string at the bottom\n\nconst parseB = (nodeName) => {\n  try {\n    const raw = $(nodeName).first()?.json;\n    const target = raw?.data || raw?.body || raw;\n    return (typeof target === 'string' ? JSON.parse(target) : target || {});\n  } catch (e) { return {}; }\n};\n\nconst patient   = parseB('DS: Fetch Patient');\nconst condB     = parseB('DS: Fetch Conditions');\nconst medB      = parseB('DS: Fetch Medications');\nconst vitalB    = parseB('DS: Fetch Vitals');\nconst labB      = parseB('DS: Fetch Labs');\nconst allergyB  = parseB('DS: Fetch Allergies');\n\nconst fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '\\u2014';\nconst getName  = (p) => {\n  const n = p?.name?.[0];\n  return n ? [n.family, ...(n.given||[])].filter(Boolean).join(', ') : 'Unknown';\n};\nconst getAge = (bd) => {\n  if (!bd) return '?';\n  const t = new Date(); const d = new Date(bd);\n  let a = t.getFullYear() - d.getFullYear();\n  if (t.getMonth() - d.getMonth() < 0 || (t.getMonth() - d.getMonth() === 0 && t.getDate() < d.getDate())) a--;\n  return a;\n};\nconst getObs = (obs) => obs.valueQuantity ? `${obs.valueQuantity.value?.toFixed(1)} ${obs.valueQuantity.unit || ''}`.trim() : (obs.valueString || '\\u2014');\n\nconst conditions  = (condB.entry || []).map(e => e.resource).map(c => `${c.code?.text || c.code?.coding?.[0]?.display || '?'} (${c.clinicalStatus?.coding?.[0]?.code || '?'})`);\nconst medications = (medB.entry || []).map(e => e.resource).map(m => `${m.medicationCodeableConcept?.text || m.medicationCodeableConcept?.coding?.[0]?.display || '?'} - ${m.status || '?'}`);\nconst vitals      = (vitalB.entry || []).slice(0, 10).map(e => e.resource).map(v => `${v.code?.text || '?'}: ${getObs(v)} (${fmtDate(v.effectiveDateTime)})`);\nconst labs        = (labB.entry || []).slice(0, 10).map(e => e.resource).map(l => `${l.code?.text || l.code?.coding?.[0]?.display || '?'}: ${getObs(l)} (${fmtDate(l.effectiveDateTime || l.issued)})`);\nconst allergies   = (allergyB.entry || []).map(e => e.resource).map(a => `${a.code?.text || a.code?.coding?.[0]?.display || '?'} (${a.criticality || '\\u2014'})`);\n\nconst patientInfo = `Name: ${getName(patient)} | DOB: ${patient.birthDate || '?'} | Age: ${getAge(patient.birthDate)} | Gender: ${patient.gender || '?'} | MRN: ${patient.id || '?'}`;\n\nconst context = [\n  `PATIENT: ${patientInfo}`,\n  `\\nACTIVE CONDITIONS (${conditions.length}):\\n${conditions.join('\\n') || 'None recorded'}`,\n  `\\nMEDICATIONS (${medications.length}):\\n${medications.join('\\n') || 'None recorded'}`,\n  `\\nALLERGIES (${allergies.length}):\\n${allergies.join('\\n') || 'NKDA'}`,\n  `\\nRECENT VITALS:\\n${vitals.join('\\n') || 'None recorded'}`,\n  `\\nRECENT LAB RESULTS:\\n${labs.join('\\n') || 'None recorded'}`,\n].join('\\n');\n\nreturn [{ json: { context, patientName: getName(patient) } }];"
+      },
+      "id": "a913f193-1f38-417c-810d-24b1d104643a",
+      "name": "DS: Assemble Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6752,
+        4240
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "options": {
+          "temperature": 0
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical documentation specialist. Write a professional hospital discharge summary in clear clinical language. Structure the summary with these clearly labeled sections: REASON FOR ADMISSION, HOSPITAL COURSE, SIGNIFICANT FINDINGS (vitals and labs), DISCHARGE MEDICATIONS, ALLERGIES, FOLLOW-UP INSTRUCTIONS, and DISCHARGE CONDITION. Be concise and clinically accurate. Do not invent information not present in the data."
+            },
+            {
+              "content": "={{ 'Generate a discharge summary from the following FHIR patient data:\\n\\n' + $json.context }}"
+            }
+          ]
+        },
+        "builtInTools": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        7000,
+        4240
+      ],
+      "id": "6281caeb-2073-4e3e-a9af-5e71dcad9046",
+      "name": "DS: Generate with AI",
+      "credentials": {
+        "openAiApi": {
+          "id": "Tux6taY8c9lUxahV",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === FORMAT AI OUTPUT AS HTML ===\n// Handles output from the 'Message a model' OpenAI node.\n// The output can come in several shapes depending on the model version.\n\nconst input = $input.first().json;\nlet text = '';\n\ntry {\n  const output = input.output;\n  if (typeof output === 'string') {\n    text = output;\n  } else if (Array.isArray(output)) {\n    for (const msg of output) {\n      if (Array.isArray(msg?.content)) {\n        for (const block of msg.content) {\n          if (block?.type === 'output_text' && block?.text) text += block.text;\n        }\n      } else if (typeof msg?.text === 'string') {\n        text += msg.text;\n      }\n    }\n  } else if (typeof output === 'object' && output !== null) {\n    if (Array.isArray(output?.content)) {\n      for (const block of output.content) {\n        if (block?.type === 'output_text' && block?.text) text += block.text;\n      }\n    } else if (typeof output?.text === 'string') {\n      text = output.text;\n    }\n  }\n  if (!text) text = input.text || input.message || input.content || '';\n} catch (e) { text = ''; }\n\nif (!text) {\n  return [{ json: { html: \"<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>Error:</strong> No AI response received. Check your OpenAI credentials.</div>\" } }];\n}\n\nconst lines = text.split('\\n');\nlet html = '<div style=\"font-family:system-ui,sans-serif;line-height:1.6\">';\nhtml += '<div style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#1e40af\">AI-generated content based on FHIR patient record. Review before clinical use.</div>';\n\nfor (const line of lines) {\n  const trimmed = line.trim();\n  if (!trimmed) { html += '<br>'; continue; }\n  if (/^[A-Z][A-Z \\/(\\\\-]{4,}:?$/.test(trimmed) || (trimmed.startsWith('**') && trimmed.endsWith('**'))) {\n    const label = trimmed.replace(/^\\*\\*|\\*\\*$/g, '').replace(/:$/, '');\n    html += `<div style=\"margin-top:16px;margin-bottom:6px;font-size:13px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e0e7ff;padding-bottom:4px\">${label}</div>`;\n  } else if (trimmed.startsWith('- ') || trimmed.startsWith('\\u2022 ') || /^\\d+\\./.test(trimmed)) {\n    const item = trimmed.replace(/^[-\\u2022]\\s+/, '').replace(/^\\d+\\.\\s*/, '');\n    html += `<div style=\"padding:3px 0 3px 14px;border-left:3px solid #dbeafe;margin:2px 0;font-size:13px;color:#1e293b\">${item}</div>`;\n  } else {\n    html += `<p style=\"margin:4px 0;font-size:13px;color:#1e293b\">${trimmed}</p>`;\n  }\n}\nhtml += '</div>';\n\nreturn [{ json: { html } }];"
+      },
+      "id": "c594008c-8033-4f69-8c11-afaa5da60b87",
+      "name": "DS: Format HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7240,
+        4240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "8b23adb1-e718-43bb-b4b5-7add1dfb8711",
+      "name": "DS: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        7480,
+        4240
+      ]
+    }
+  ],
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /discharge-summary-run": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Patient": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Conditions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Conditions": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Medications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Medications": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Vitals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Vitals": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Labs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Labs": {
+      "main": [
+        [
+          {
+            "node": "DS: Fetch Allergies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Fetch Allergies": {
+      "main": [
+        [
+          {
+            "node": "DS: Assemble Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Assemble Context": {
+      "main": [
+        [
+          {
+            "node": "DS: Generate with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Generate with AI": {
+      "main": [
+        [
+          {
+            "node": "DS: Format HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DS: Format HTML": {
+      "main": [
+        [
+          {
+            "node": "DS: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f8c85c4ccab04261e242fbd965992815cdbe2f465312d5e52b80fcb4241f4b47"
+  }
+}

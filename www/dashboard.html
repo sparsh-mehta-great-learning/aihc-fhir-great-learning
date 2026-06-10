@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EpicCare - Chart</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <header class="epic-header">
+        <div class="epic-logo">
+            <span class="epic-logo-icon">Epic</span>
+            <span class="epic-product">EpicCare</span>
+        </div>
+        <div class="epic-header-right">
+            <span class="epic-user">Provider</span>
+            <span class="epic-date" id="currentDate"></span>
+            <a href="index.html" class="epic-exit">Exit</a>
+        </div>
+    </header>
+
+    <nav class="epic-nav-tabs">
+        <a href="#" class="epic-tab active">Patient</a>
+        <a href="#" class="epic-tab">Chart</a>
+        <a href="#" class="epic-tab">In Basket</a>
+        <a href="#" class="epic-tab">Tools</a>
+        <span class="epic-tab-spacer"></span>
+    </nav>
+
+    <div id="patientBanner" class="epic-patient-banner hidden">
+        <div class="banner-content">
+            <span class="banner-field"><strong>MRN:</strong> <span id="bannerMRN">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Name:</strong> <span id="bannerName">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>DOB:</strong> <span id="bannerDOB">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Age:</strong> <span id="bannerAge">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Sex:</strong> <span id="bannerSex">—</span></span>
+            <span class="banner-divider">|</span>
+            <span class="banner-field"><strong>Phone:</strong> <span id="bannerPhone">—</span></span>
+            <button type="button" id="editPatientBtn" class="banner-change-btn">Edit</button>
+            <button type="button" id="deletePatientBtn" class="banner-change-btn banner-delete-btn">Delete</button>
+            <button type="button" id="clearPatientBtn" class="banner-change-btn">Change Patient</button>
+        </div>
+    </div>
+
+    <div class="epic-layout">
+        <aside class="epic-activity-sidebar">
+            <div class="activity-section">
+                <div class="activity-label">Patient</div>
+                <div class="activity-search">
+                    <input type="text" id="patientSearch" placeholder="Search by name or MRN..." autocomplete="off">
+                    <button type="button" id="searchBtn" class="activity-search-btn">Search</button>
+                </div>
+            </div>
+
+            <div class="activity-section">
+                <div class="activity-label">Chart Review</div>
+                <a href="#" class="activity-item active" data-tab="allergies">Allergies</a>
+                <a href="#" class="activity-item" data-tab="chart">Chart Review</a>
+                <a href="#" class="activity-item" data-tab="problems">Problem List</a>
+                <a href="#" class="activity-item" data-tab="medications">Medications</a>
+                <a href="#" class="activity-item" data-tab="labs">Labs</a>
+                <a href="#" class="activity-item" data-tab="vitals">Vitals</a>
+                <a href="#" class="activity-item" data-tab="demographics">Demographics</a>
+            </div>
+
+            <!-- NEW: Data Entry Section -->
+            <div class="activity-section">
+                <div class="activity-label">
+                    Data Entry
+                    <span class="ai-label" style="background:#2b6cb0;">Manual</span>
+                </div>
+                <a href="#" class="activity-item" data-tab="manual-entry">&#10133; Add / Update Data</a>
+                <a href="#" class="activity-item" data-tab="pdf-upload">&#128196; Upload Report PDF</a>
+            </div>
+
+            <!-- AI Features — all sidebar links injected dynamically from n8n list-panels -->
+            <div class="activity-section activity-ai" id="aiSection">
+                <div class="activity-label">
+                    AI Features
+                    <span class="ai-label">n8n</span>
+                    <button type="button" id="refreshPluginsBtn" class="plugin-refresh-btn" title="Refresh registered plugins">&#8635;</button>
+                </div>
+                <!-- No hardcoded links here. n8n list-panels drives every entry -->
+                <div id="dynamicPluginLinks"></div>
+                <div id="pluginStatus" class="plugin-status"></div>
+            </div>
+        </aside>
+
+        <main class="epic-main">
+            <!-- Patient List -->
+            <section id="patientListSection" class="epic-content-panel">
+                <div class="panel-header panel-header-flex">
+                    <div>
+                        <h2>Patient List</h2>
+                        <p class="panel-subtitle">Search for a patient to open their chart</p>
+                    </div>
+                    <button type="button" id="addPatientBtn" class="epic-btn epic-btn-primary">+ Add Patient</button>
+                </div>
+                <div id="patientList" class="epic-patient-list">
+                    <div class="empty-message">Enter a search term above and click Search to find patients.</div>
+                </div>
+            </section>
+
+            <!-- Patient Chart -->
+            <section id="patientChartSection" class="epic-content-panel hidden">
+                <div id="tabPanels">
+
+                    <!-- ── EXISTING CHART TABS ── -->
+                    <div id="allergiesPanel" class="epic-tab-panel active">
+                        <div class="panel-header"><h2>Allergies</h2></div>
+                        <div id="allergiesContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="chartPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Chart Review</h2>
+                            <p class="panel-subtitle">Recent encounters and conditions</p>
+                        </div>
+                        <div id="overviewContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="problemsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Problem List</h2></div>
+                        <div id="problemsContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="medicationsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Medications</h2></div>
+                        <div id="medicationsContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="labsPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Laboratory Results</h2>
+                            <p class="panel-subtitle">View in table format</p>
+                        </div>
+                        <div id="labsContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="vitalsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Vital Signs</h2></div>
+                        <div id="vitalsContent" class="epic-data-content"></div>
+                    </div>
+
+                    <div id="demographicsPanel" class="epic-tab-panel">
+                        <div class="panel-header"><h2>Demographics</h2></div>
+                        <div id="demographicsContent" class="epic-data-content"></div>
+                    </div>
+
+                    <!-- All AI panels (Discharge, Pre-visit, Risk Score, Care Gaps, etc.)
+                         are injected here dynamically by JS from n8n list-panels.
+                         To add a new feature: add it in n8n — no HTML changes needed. -->
+                    <div id="dynamicPanelContainer"></div>
+
+                    <!-- ══════════════════════════════════════
+                         NEW FEATURE 1: MANUAL DATA ENTRY
+                    ══════════════════════════════════════ -->
+                    <div id="manual-entryPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Add / Update Patient Data <span class="ai-badge" style="background:#2b6cb0;">Manual Entry</span></h2>
+                            <p class="panel-subtitle">Add labs, vitals, medications, conditions, or allergies. Fields left blank retain the most recent previously recorded value with its original date.</p>
+                        </div>
+
+                        <div class="entry-type-tabs">
+                            <button class="entry-type-btn active" data-entry="labs">&#129514; Labs</button>
+                            <button class="entry-type-btn" data-entry="vitals">&#10084; Vitals</button>
+                            <button class="entry-type-btn" data-entry="medications">&#128138; Medications</button>
+                            <button class="entry-type-btn" data-entry="conditions">&#129686; Conditions</button>
+                            <button class="entry-type-btn" data-entry="allergies-entry">&#9888; Allergies</button>
+                        </div>
+
+                        <!-- Labs -->
+                        <div id="entry-labs" class="entry-section active-entry">
+                            <h3>Laboratory Result</h3>
+                            <div class="entry-grid">
+                                <div class="entry-field"><label>Test Name <span class="req">*</span></label><input type="text" id="lab-name" placeholder="e.g. HbA1c, Glucose, CBC"></div>
+                                <div class="entry-field"><label>LOINC Code</label><input type="text" id="lab-loinc" placeholder="e.g. 4548-4"></div>
+                                <div class="entry-field"><label>Value <span class="req">*</span></label><input type="number" step="any" id="lab-value" placeholder="Numeric value"></div>
+                                <div class="entry-field"><label>Unit</label><input type="text" id="lab-unit" placeholder="e.g. mg/dL, %"></div>
+                                <div class="entry-field"><label>Reference Range</label><input type="text" id="lab-ref" placeholder="e.g. 70-100"></div>
+                                <div class="entry-field"><label>Date <span class="req">*</span></label><input type="datetime-local" id="lab-date"></div>
+                                <div class="entry-field"><label>Status</label>
+                                    <select id="lab-status">
+                                        <option value="final">Final</option>
+                                        <option value="preliminary">Preliminary</option>
+                                        <option value="amended">Amended</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="entry-actions">
+                                <button class="epic-btn epic-btn-primary" id="saveLab" disabled>Save Lab Result</button>
+                                <span class="entry-note">&#8505; Fields not entered will keep their previous recorded value and date.</span>
+                            </div>
+                        </div>
+
+                        <!-- Vitals -->
+                        <div id="entry-vitals" class="entry-section">
+                            <h3>Vital Signs <small style="font-weight:400;color:#888;">— leave blank to keep previous value</small></h3>
+                            <div class="entry-grid">
+                                <div class="entry-field">
+                                    <label>Blood Pressure</label>
+                                    <div class="inline-inputs">
+                                        <input type="number" id="vital-bp-sys" placeholder="Sys" min="50" max="250">
+                                        <span class="sep">/</span>
+                                        <input type="number" id="vital-bp-dia" placeholder="Dia" min="30" max="150">
+                                        <span class="unit-label">mmHg</span>
+                                    </div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>Heart Rate</label>
+                                    <div class="inline-inputs"><input type="number" id="vital-hr" placeholder="72"><span class="unit-label">bpm</span></div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>Temperature</label>
+                                    <div class="inline-inputs">
+                                        <input type="number" step="0.1" id="vital-temp" placeholder="98.6">
+                                        <select id="vital-temp-unit"><option value="F">°F</option><option value="C">°C</option></select>
+                                    </div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>SpO2</label>
+                                    <div class="inline-inputs"><input type="number" step="0.1" id="vital-spo2" placeholder="98" min="0" max="100"><span class="unit-label">%</span></div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>Respiratory Rate</label>
+                                    <div class="inline-inputs"><input type="number" id="vital-rr" placeholder="16"><span class="unit-label">br/min</span></div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>Weight</label>
+                                    <div class="inline-inputs">
+                                        <input type="number" step="0.1" id="vital-weight" placeholder="70">
+                                        <select id="vital-weight-unit"><option value="kg">kg</option><option value="lb">lb</option></select>
+                                    </div>
+                                </div>
+                                <div class="entry-field">
+                                    <label>Height</label>
+                                    <div class="inline-inputs">
+                                        <input type="number" step="0.1" id="vital-height" placeholder="170">
+                                        <select id="vital-height-unit"><option value="cm">cm</option><option value="in">in</option></select>
+                                    </div>
+                                </div>
+                                <div class="entry-field"><label>Date / Time</label><input type="datetime-local" id="vital-date"></div>
+                            </div>
+                            <div class="entry-actions">
+                                <button class="epic-btn epic-btn-primary" id="saveVitals" disabled>Save Vitals</button>
+                                <span class="entry-note">&#8505; Only filled fields will be saved. Blank fields retain the previous measurement with its original date.</span>
+                            </div>
+                        </div>
+
+                        <!-- Medications -->
+                        <div id="entry-medications" class="entry-section">
+                            <h3>Medication</h3>
+                            <div class="entry-grid">
+                                <div class="entry-field"><label>Medication Name <span class="req">*</span></label><input type="text" id="med-name" placeholder="e.g. Metformin, Lisinopril"></div>
+                                <div class="entry-field"><label>RxNorm Code</label><input type="text" id="med-rxnorm" placeholder="e.g. 860975"></div>
+                                <div class="entry-field"><label>Dose</label><input type="text" id="med-dose" placeholder="e.g. 500 mg"></div>
+                                <div class="entry-field"><label>Route</label>
+                                    <select id="med-route">
+                                        <option value="">—</option>
+                                        <option value="oral">Oral</option>
+                                        <option value="intravenous">IV</option>
+                                        <option value="subcutaneous">Subcutaneous</option>
+                                        <option value="topical">Topical</option>
+                                        <option value="inhaled">Inhaled</option>
+                                    </select>
+                                </div>
+                                <div class="entry-field"><label>Frequency</label><input type="text" id="med-freq" placeholder="e.g. twice daily, QID"></div>
+                                <div class="entry-field"><label>Start Date</label><input type="date" id="med-start"></div>
+                                <div class="entry-field"><label>Status</label>
+                                    <select id="med-status">
+                                        <option value="active">Active</option>
+                                        <option value="stopped">Stopped</option>
+                                        <option value="on-hold">On Hold</option>
+                                        <option value="completed">Completed</option>
+                                    </select>
+                                </div>
+                                <div class="entry-field entry-full"><label>Instructions / Notes</label><input type="text" id="med-notes" placeholder="Take with food, avoid grapefruit..."></div>
+                            </div>
+                            <div class="entry-actions">
+                                <button class="epic-btn epic-btn-primary" id="saveMed" disabled>Save Medication</button>
+                            </div>
+                        </div>
+
+                        <!-- Conditions -->
+                        <div id="entry-conditions" class="entry-section">
+                            <h3>Problem / Condition</h3>
+                            <div class="entry-grid">
+                                <div class="entry-field"><label>Condition Name <span class="req">*</span></label><input type="text" id="cond-name" placeholder="e.g. Type 2 Diabetes Mellitus"></div>
+                                <div class="entry-field"><label>ICD-10 Code</label><input type="text" id="cond-icd" placeholder="e.g. E11.9"></div>
+                                <div class="entry-field"><label>Clinical Status</label>
+                                    <select id="cond-status">
+                                        <option value="active">Active</option>
+                                        <option value="remission">Remission</option>
+                                        <option value="resolved">Resolved</option>
+                                        <option value="inactive">Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="entry-field"><label>Severity</label>
+                                    <select id="cond-severity">
+                                        <option value="">—</option>
+                                        <option value="mild">Mild</option>
+                                        <option value="moderate">Moderate</option>
+                                        <option value="severe">Severe</option>
+                                    </select>
+                                </div>
+                                <div class="entry-field"><label>Onset Date</label><input type="date" id="cond-onset"></div>
+                                <div class="entry-field"><label>Recorded Date</label><input type="date" id="cond-recorded"></div>
+                            </div>
+                            <div class="entry-actions">
+                                <button class="epic-btn epic-btn-primary" id="saveCond" disabled>Save Condition</button>
+                            </div>
+                        </div>
+
+                        <!-- Allergies -->
+                        <div id="entry-allergies-entry" class="entry-section">
+                            <h3>Allergy / Intolerance</h3>
+                            <div class="entry-grid">
+                                <div class="entry-field"><label>Allergen <span class="req">*</span></label><input type="text" id="allergy-name" placeholder="e.g. Penicillin, Peanuts"></div>
+                                <div class="entry-field"><label>Type</label>
+                                    <select id="allergy-type"><option value="allergy">Allergy</option><option value="intolerance">Intolerance</option></select>
+                                </div>
+                                <div class="entry-field"><label>Criticality</label>
+                                    <select id="allergy-criticality"><option value="low">Low</option><option value="high">High</option><option value="unable-to-assess">Unable to assess</option></select>
+                                </div>
+                                <div class="entry-field"><label>Reaction</label><input type="text" id="allergy-reaction" placeholder="e.g. Anaphylaxis, Rash, Urticaria"></div>
+                                <div class="entry-field"><label>Severity</label>
+                                    <select id="allergy-sev"><option value="">—</option><option value="mild">Mild</option><option value="moderate">Moderate</option><option value="severe">Severe</option></select>
+                                </div>
+                                <div class="entry-field"><label>Onset Date</label><input type="date" id="allergy-onset"></div>
+                            </div>
+                            <div class="entry-actions">
+                                <button class="epic-btn epic-btn-primary" id="saveAllergy" disabled>Save Allergy</button>
+                            </div>
+                        </div>
+
+                        <div id="entryFeedback" class="entry-feedback hidden"></div>
+                    </div>
+
+                    <!-- ══════════════════════════════════════
+                         NEW FEATURE 2: PDF REPORT UPLOAD
+                    ══════════════════════════════════════ -->
+                    <div id="pdf-uploadPanel" class="epic-tab-panel">
+                        <div class="panel-header">
+                            <h2>Upload Lab / Report PDF <span class="ai-badge">n8n + AI</span></h2>
+                            <p class="panel-subtitle">Upload a PDF report. n8n will extract values and merge them into the chart. Fields missing from the new report retain their previous value with the original date.</p>
+                        </div>
+
+                        <div class="pdf-upload-zone" id="pdfDropZone">
+                            <div class="pdf-upload-icon">&#128196;</div>
+                            <p class="pdf-upload-title">Drag &amp; drop a PDF report here</p>
+                            <p class="pdf-upload-sub">or <label for="pdfFileInput" class="pdf-browse-link">browse to choose a file</label></p>
+                            <input type="file" id="pdfFileInput" accept=".pdf" style="display:none">
+                            <p style="margin-top:8px;font-size:11px;color:#888;">Lab panels &bull; Blood work &bull; Imaging summaries &bull; Discharge notes</p>
+                        </div>
+
+                        <div id="pdfFileInfo" class="pdf-file-info hidden">
+                            <span id="pdfFileName" class="pdf-file-name"></span>
+                            <span id="pdfFileSize" class="pdf-file-size"></span>
+                            <button type="button" id="clearPdfBtn" class="pdf-clear-btn">&#10005; Remove</button>
+                        </div>
+
+                        <div class="pdf-options">
+                            <label class="pdf-option-row">
+                                <input type="checkbox" id="pdfKeepPrevious" checked>
+                                <span>Preserve previous values for fields not found in this report</span>
+                            </label>
+                            <label class="pdf-option-row">
+                                <input type="checkbox" id="pdfShowDates" checked>
+                                <span>Show source date next to each extracted value</span>
+                            </label>
+                            <div class="pdf-report-type">
+                                <label>Report type hint:</label>
+                                <select id="pdfReportType">
+                                    <option value="auto">Auto-detect</option>
+                                    <option value="labs">Laboratory Results</option>
+                                    <option value="vitals">Vital Signs</option>
+                                    <option value="imaging">Imaging / Radiology</option>
+                                    <option value="discharge">Discharge Summary</option>
+                                    <option value="general">General Clinical Note</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button type="button" id="processPdfBtn" class="epic-btn epic-btn-primary" disabled>
+                            &#128228; Send to n8n for Processing
+                        </button>
+
+                        <div id="pdfProcessing" class="pdf-processing hidden">
+                            <div class="epic-spinner-inline"></div>
+                            <span id="pdfProcessingMsg">Uploading PDF to n8n...</span>
+                        </div>
+
+                        <div id="pdfResult" class="pdf-result hidden">
+                            <div class="pdf-result-header">
+                                <h3>Extraction Results <span class="ai-badge">AI Parsed</span></h3>
+                                <div id="pdfResultMeta" class="pdf-result-meta"></div>
+                            </div>
+                            <div id="pdfResultContent" class="pdf-result-content"></div>
+                            <div class="entry-actions" style="margin-top:16px;">
+                                <button type="button" id="applyPdfResultBtn" class="epic-btn epic-btn-primary">&#10003; Apply to Patient Chart</button>
+                                <button type="button" id="discardPdfResultBtn" class="epic-btn epic-btn-secondary">Discard</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ══════════════════════════════════════
+                         LIVE CONSULTATION + VIRTUAL DOCTOR
+                    ══════════════════════════════════════ -->
+                    <div id="live-consultPanel" class="epic-tab-panel epic-ai-panel epic-builtin-panel">
+                        <div class="panel-header panel-header-flex">
+                            <div>
+                                <h2>Live Consultation <span class="ai-badge">Real-time AI</span></h2>
+                                <p class="panel-subtitle">Speak live or use Virtual Doctor mode — the AI asks clinical questions, transcribes the conversation, then updates the chart automatically.</p>
+                            </div>
+                            <div class="consult-session-meta">
+                                <span id="consultStatus" class="consult-status-badge idle">&#9679; Idle</span>
+                                <span id="consultDuration" class="consult-duration">00:00</span>
+                            </div>
+                        </div>
+
+                        <!-- Mode Selector -->
+                        <div class="consult-mode-bar">
+                            <button type="button" id="modeManualBtn" class="mode-btn active" data-mode="speak">
+                                &#127897; Patient Speaks
+                                <span class="mode-desc">AI Doctor listens &amp; responds</span>
+                            </button>
+                            <button type="button" id="modeVirtualBtn" class="mode-btn" data-mode="type">
+                                &#9998; Patient Types
+                                <span class="mode-desc">AI Doctor reads &amp; responds</span>
+                            </button>
+                        </div>
+
+                        <!-- Participants -->
+                        <div class="consult-participants">
+                            <div class="participant-card" id="doctorCard">
+                                <div class="participant-avatar doctor" id="doctorAvatarLabel">Dr</div>
+                                <div class="participant-info">
+                                    <div class="participant-name" id="doctorCardName">Dr. Provider</div>
+                                    <div class="participant-role" id="doctorCardRole">Physician</div>
+                                </div>
+                                <div id="doctorMicStatus" class="mic-indicator off">&#127897;</div>
+                            </div>
+                            <div class="participant-vs">&#8644;</div>
+                            <div class="participant-card" id="patientCard">
+                                <div class="participant-avatar patient">Pt</div>
+                                <div class="participant-info">
+                                    <div class="participant-name" id="consultPatientName">Patient</div>
+                                    <div class="participant-role">Patient</div>
+                                </div>
+                                <div id="patientMicStatus" class="mic-indicator off">&#127897;</div>
+                            </div>
+                        </div>
+
+                        <!-- AI Doctor status bubble (Virtual mode only) -->
+                        <div id="aiDoctorBubble" class="ai-doctor-bubble hidden">
+                            <div class="ai-bubble-avatar">&#129302;</div>
+                            <div id="aiDoctorText" class="ai-bubble-text">Thinking…</div>
+                        </div>
+
+                        <!-- Consultation Controls -->
+                        <div class="consult-controls">
+                            <button type="button" id="startConsultBtn" class="epic-btn epic-btn-primary" disabled>
+                                &#127897; Start Consultation
+                            </button>
+                            <button type="button" id="toggleSpeakerBtn" class="epic-btn epic-btn-secondary hidden">
+                                Switch to Patient
+                            </button>
+                            <button type="button" id="endConsultBtn" class="epic-btn epic-btn-danger hidden">
+                                &#9209; End &amp; Generate Notes
+                            </button>
+                            <div class="voice-wave-wrap">
+                                <span id="currentSpeakerLabel" class="current-speaker-label"></span>
+                                <div id="voiceWave" class="voice-wave hidden">
+                                    <span></span><span></span><span></span><span></span><span></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Text input — patient types here in 'type' mode; mic used in 'speak' mode -->
+                        <div class="consult-text-fallback">
+                            <div class="fallback-label">
+                                <span id="textFallbackLabel">&#9998; Patient: type your message:</span>
+                            </div>
+                            <div class="fallback-input-row">
+                                <input type="text" id="consultTextInput" placeholder="Type patient's message and press Enter…" disabled>
+                                <button type="button" id="addTranscriptLineBtn" class="epic-btn epic-btn-secondary" disabled>Send</button>
+                            </div>
+                        </div>
+
+                        <!-- Live Transcript -->
+                        <div class="consult-block">
+                            <div class="consult-block-label">
+                                Live Transcript
+                                <button type="button" id="clearTranscriptBtn" class="mini-action-btn">Clear</button>
+                            </div>
+                            <div id="consultTranscript" class="consult-transcript">
+                                <p class="no-data">Start a consultation to see the live transcript here…</p>
+                            </div>
+                        </div>
+
+                        <!-- AI Action Buttons -->
+                        <div class="consult-ai-toolbar">
+                            <button type="button" id="generateClinicalNotesBtn" class="epic-btn epic-btn-primary" disabled>
+                                &#128203; Generate Clinical Notes (SOAP)
+                            </button>
+                            <button type="button" id="updateChartFromConsultBtn" class="epic-btn epic-btn-secondary" disabled>
+                                &#128260; Extract &amp; Update Chart
+                            </button>
+                        </div>
+
+                        <!-- Clinical Notes Output -->
+                        <div id="clinicalNotesSection" class="consult-block hidden">
+                            <div class="consult-block-label">Clinical Notes — SOAP Format</div>
+                            <div id="clinicalNotesContent" class="consult-output epic-ai-output"></div>
+                            <div class="entry-actions" style="margin-top:12px;">
+                                <button type="button" id="saveNotesToFhirBtn" class="epic-btn epic-btn-primary">&#128190; Save Notes to Chart</button>
+                                <button type="button" id="copyNotesBtn" class="epic-btn epic-btn-secondary">&#128203; Copy Notes</button>
+                            </div>
+                        </div>
+
+                        <!-- Chart Update Preview -->
+                        <div id="chartUpdatePreview" class="consult-block hidden">
+                            <div class="consult-block-label">Suggested Chart Updates</div>
+                            <div id="chartUpdateContent" class="consult-output epic-ai-output"></div>
+                            <div class="entry-actions" style="margin-top:12px;">
+                                <button type="button" id="applyConsultUpdatesBtn" class="epic-btn epic-btn-primary">&#10003; Apply Updates to Chart</button>
+                                <button type="button" id="discardConsultUpdatesBtn" class="epic-btn epic-btn-secondary">Discard</button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div><!-- /tabPanels -->
+            </section>
+        </main>
+    </div>
+
+    <!-- Patient CRUD Modal -->
+    <div id="patientModal" class="epic-modal hidden">
+        <div class="epic-modal-overlay"></div>
+        <div class="epic-modal-content">
+            <div class="epic-modal-header">
+                <h3 id="patientModalTitle">Add Patient</h3>
+                <button type="button" id="closePatientModal" class="epic-modal-close">&times;</button>
+            </div>
+            <form id="patientForm" class="epic-modal-body">
+                <input type="hidden" id="patientFormId" name="id">
+                <div class="form-row"><label for="patientFamily">Family Name *</label><input type="text" id="patientFamily" name="family" required></div>
+                <div class="form-row"><label for="patientGiven">Given Name *</label><input type="text" id="patientGiven" name="given" required></div>
+                <div class="form-row"><label for="patientBirthDate">Date of Birth</label><input type="date" id="patientBirthDate" name="birthDate"></div>
+                <div class="form-row">
+                    <label for="patientGender">Gender</label>
+                    <select id="patientGender" name="gender">
+                        <option value="">—</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option><option value="unknown">Unknown</option>
+                    </select>
+                </div>
+                <div class="form-row"><label for="patientPhone">Phone</label><input type="tel" id="patientPhone" name="phone" placeholder="e.g. 555-123-4567"></div>
+                <div class="form-row"><label for="patientAddress">Address (street, city, state, postal)</label><input type="text" id="patientAddress" name="address" placeholder="123 Main St, Springfield, IL 62701"></div>
+            </form>
+            <div class="epic-modal-footer">
+                <button type="button" id="cancelPatientModal" class="epic-btn epic-btn-secondary">Cancel</button>
+                <button type="button" id="savePatientBtn" class="epic-btn epic-btn-primary">Save Patient</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="epic-loading hidden">
+        <div class="epic-spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>
