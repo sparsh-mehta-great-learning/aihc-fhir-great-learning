@@ -169,15 +169,4 @@ In `www/template.html`:
 
 And then `docker compose up -d` normally. Your launcher and fhir proxy will now be running with a self-signed certificate (that you'll have to approve of course).
 
-=======
 # AIHC-fhir-demo
->>>>>>> 1fec4d7d25fd4829d09b37e554c3bd34242fb727
-=======
-# AIHC-fhir-demo
->>>>>>> 1fec4d7d25fd4829d09b37e554c3bd34242fb727
-
-# To write pph data use this:
-Invoke-RestMethod -Uri "http://localhost:4004/hapi-fhir-jpaserver/fhir" `
->>                   -Method Post `
->>                   -ContentType "application/fhir+json" `
->>                   -InFile "pph_patients_bundle.json"

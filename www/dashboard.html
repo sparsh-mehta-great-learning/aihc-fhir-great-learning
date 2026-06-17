@@ -496,6 +496,7 @@
                             <div class="consult-block-label">
                                 Live Transcript
                                 <button type="button" id="clearTranscriptBtn" class="mini-action-btn">Clear</button>
+                                <button type="button" id="resetSessionBtn" class="mini-action-btn">&#8634; Reset session</button>
                             </div>
                             <div id="consultTranscript" class="consult-transcript">
                                 <p class="no-data">Start a consultation to see the live transcript here…</p>
@@ -529,6 +530,22 @@
                             <div class="entry-actions" style="margin-top:12px;">
                                 <button type="button" id="applyConsultUpdatesBtn" class="epic-btn epic-btn-primary">&#10003; Apply Updates to Chart</button>
                                 <button type="button" id="discardConsultUpdatesBtn" class="epic-btn epic-btn-secondary">Discard</button>
+                            </div>
+                        </div>
+
+                        <!-- Clinician Review — Human-in-the-Loop for ICD Codes & MDM -->
+                        <div id="clinicianReviewSection" class="consult-block hidden">
+                            <div class="consult-block-label" style="display:flex;align-items:center;gap:10px;">
+                                <span>&#9881; Clinician Review — ICD Codes &amp; MDM</span>
+                                <span style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;letter-spacing:.5px;">HUMAN IN THE LOOP</span>
+                            </div>
+                            <p style="font-size:12px;color:#6b7280;margin:6px 0 14px;">AI has proposed the codes below. Review, edit, or remove any item before committing to the chart.</p>
+                            <div id="clinicianReviewContent">
+                                <p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Extracting ICD codes and MDM via n8n…</p>
+                            </div>
+                            <div class="entry-actions" style="margin-top:14px;">
+                                <button type="button" id="confirmReviewBtn" class="epic-btn epic-btn-primary" disabled>&#10003; Confirm &amp; Commit to Chart</button>
+                                <button type="button" id="discardReviewBtn" class="epic-btn epic-btn-secondary">Discard</button>
                             </div>
                         </div>
                     </div>

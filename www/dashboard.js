@@ -550,7 +550,7 @@ async function loadOverview() {
   el.innerHTML = '<p class="no-data">Loading chart review...</p>';
   try {
     const [encBundle, condBundle] = await Promise.all([
-      fhirGet('Encounter',  { patient: selectedPatient.id, _count: 10 }).catch(() => ({ entry: [] })),
+      fhirGet('Encounter',  { patient: selectedPatient.id, _count: 10, _sort: '-date' }).catch(() => ({ entry: [] })),
       fhirGet('Condition',  { patient: selectedPatient.id, _count: 5  }).catch(() => ({ entry: [] })),
     ]);
     const encounters = encBundle.entry?.map((e) => e.resource) ?? [];
@@ -1073,6 +1073,7 @@ let consultState = {
   timerInterval:   null,
   startTime:       null,
   pendingChartUpdates: [],
+  pendingReview:   null,
   aiThinking:      false,
 };
 
@@ -1110,11 +1111,40 @@ function initLiveConsult() {
   document.getElementById('toggleSpeakerBtn')?.addEventListener('click', toggleSpeaker);
   document.getElementById('endConsultBtn')?.addEventListener('click', endConsultation);
   document.getElementById('clearTranscriptBtn')?.addEventListener('click', clearTranscript);
+  document.getElementById('resetSessionBtn')?.addEventListener('click', resetConsultSession);
   document.getElementById('generateClinicalNotesBtn')?.addEventListener('click', generateClinicalNotes);
   document.getElementById('updateChartFromConsultBtn')?.addEventListener('click', extractChartUpdates);
   document.getElementById('applyConsultUpdatesBtn')?.addEventListener('click', applyConsultUpdates);
   document.getElementById('discardConsultUpdatesBtn')?.addEventListener('click', () => {
     document.getElementById('chartUpdatePreview').classList.add('hidden');
+  });
+  document.getElementById('confirmReviewBtn')?.addEventListener('click', commitReviewedCodes);
+  document.getElementById('discardReviewBtn')?.addEventListener('click', () => {
+    document.getElementById('clinicianReviewSection').classList.add('hidden');
+    consultState.pendingReview = null;
+  });
+  // Delegated: "Add ICD Row" button is injected dynamically into clinicianReviewContent
+  document.getElementById('clinicianReviewSection')?.addEventListener('click', (e) => {
+    if (e.target.id === 'addIcdRowBtn') {
+      const tbody = document.getElementById('icdTableBody');
+      if (!tbody) return;
+      const idx = tbody.querySelectorAll('tr').length;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="padding:8px 6px;text-align:center;">
+          <input type="checkbox" class="icd-confirm-chk" data-idx="${idx}" checked style="width:16px;height:16px;cursor:pointer;">
+        </td>
+        <td style="padding:8px 6px;">
+          <input type="text" class="icd-code-input" data-idx="${idx}" placeholder="e.g. J06.9"
+            style="width:80px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-family:monospace;font-size:13px;">
+        </td>
+        <td style="padding:8px 6px;">
+          <input type="text" class="icd-desc-input" data-idx="${idx}" placeholder="Description"
+            style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px;">
+        </td>
+        <td style="padding:8px 6px;text-align:center;font-size:11px;color:#6b7280">manual</td>`;
+      tbody.appendChild(tr);
+    }
   });
   document.getElementById('saveNotesToFhirBtn')?.addEventListener('click', saveNotesToFhir);
   document.getElementById('copyNotesBtn')?.addEventListener('click', copyClinicalNotes);
@@ -1240,14 +1270,66 @@ function endConsultation() {
   if (consultState.transcript.length > 0) {
     generateClinicalNotes();
     extractChartUpdates();
+    fetchClinicalCodes();
   }
 }
 
 function clearTranscript() {
   consultState.transcript = [];
+  consultState.pendingReview = null;
   renderTranscript();
   document.getElementById('clinicalNotesSection').classList.add('hidden');
   document.getElementById('chartUpdatePreview').classList.add('hidden');
+  document.getElementById('clinicianReviewSection')?.classList.add('hidden');
+}
+
+// Reset the Live Consultation back to its default state (UI/session only — no FHIR data is touched).
+function resetConsultSession() {
+  // Stop anything in progress.
+  consultState.active = false;
+  stopSpeechRecognition();
+  stopTimer();
+  window.speechSynthesis?.cancel();
+
+  // Reset in-memory session state to defaults.
+  consultState.currentSpeaker     = 'patient';
+  consultState.transcript         = [];
+  consultState.pendingChartUpdates = [];
+  consultState.pendingReview      = null;
+  consultState.aiThinking         = false;
+  consultState.startTime          = null;
+
+  // Clear generated outputs (SOAP notes + E/M coding, and chart-update preview).
+  renderTranscript();
+  const notesEl = document.getElementById('clinicalNotesContent');
+  if (notesEl) notesEl.innerHTML = '';
+  const chartEl = document.getElementById('chartUpdateContent');
+  if (chartEl) chartEl.innerHTML = '';
+  document.getElementById('clinicalNotesSection')?.classList.add('hidden');
+  document.getElementById('chartUpdatePreview')?.classList.add('hidden');
+  document.getElementById('clinicianReviewSection')?.classList.add('hidden');
+  document.getElementById('aiDoctorBubble')?.classList.add('hidden');
+
+  // Return the controls to their idle/default look.
+  setConsultStatus('idle', '● Idle');
+  const startBtn = document.getElementById('startConsultBtn');
+  if (startBtn) {
+    startBtn.classList.remove('hidden');
+    startBtn.textContent = '🎙 Start Consultation';
+    startBtn.disabled = !selectedPatient;
+  }
+  document.getElementById('toggleSpeakerBtn')?.classList.add('hidden');
+  document.getElementById('endConsultBtn')?.classList.add('hidden');
+  document.getElementById('voiceWave')?.classList.add('hidden');
+  const speakerLbl = document.getElementById('currentSpeakerLabel');
+  if (speakerLbl) speakerLbl.textContent = '';
+  const dMic = document.getElementById('doctorMicStatus');
+  if (dMic) dMic.className = 'mic-indicator off';
+  const pMic = document.getElementById('patientMicStatus');
+  if (pMic) pMic.className = 'mic-indicator off';
+  document.getElementById('doctorCard')?.classList.remove('participant-active');
+  document.getElementById('patientCard')?.classList.remove('participant-active', 'listening-mode');
+  document.querySelectorAll('.mode-btn').forEach((b) => { b.disabled = false; });
 }
 
 function addTextLine() {
@@ -1513,13 +1595,35 @@ async function extractChartUpdates() {
   }
 }
 
+// Build an Encounter resource that records this live consultation so it shows
+// up under "Recent Encounters" in Chart Review.
+function buildConsultEncounter() {
+  const start = consultState.startTime ? new Date(consultState.startTime) : new Date();
+  return {
+    resourceType: 'Encounter',
+    status: 'finished',
+    class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'VR', display: 'virtual' },
+    type: [{ text: 'Live Virtual Consultation' }],
+    subject: { reference: `Patient/${selectedPatient.id}` },
+    period: { start: start.toISOString(), end: new Date().toISOString() },
+  };
+}
+
 async function applyConsultUpdates() {
   const resources = consultState.pendingChartUpdates;
   if (!resources?.length) { showEntryFeedback('No FHIR resources to apply.', 'error'); return; }
   document.getElementById('applyConsultUpdatesBtn').disabled = true;
   try {
     await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
-    showEntryFeedback(`✓ ${resources.length} update(s) from consultation applied to chart.`);
+    // Record the consultation itself as an Encounter so Recent Encounters updates.
+    let encounterNote = '';
+    try {
+      await fhirPost('Encounter', buildConsultEncounter());
+    } catch (encErr) {
+      console.warn('Could not create consultation Encounter:', encErr);
+      encounterNote = ' (encounter log failed)';
+    }
+    showEntryFeedback(`✓ ${resources.length} update(s) from consultation applied to chart.${encounterNote}`);
     loadLabs(); loadVitals(); loadMedications(); loadProblems(); loadAllergies(); loadOverview();
     document.getElementById('chartUpdatePreview').classList.add('hidden');
     consultState.pendingChartUpdates = [];
@@ -1557,6 +1661,185 @@ function copyClinicalNotes() {
     btn.textContent = '✓ Copied!';
     setTimeout(() => { btn.textContent = orig; }, 2000);
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HUMAN-IN-THE-LOOP: ICD CODES & MDM REVIEW
+// ═══════════════════════════════════════════════════════════════
+
+async function fetchClinicalCodes() {
+  if (!selectedPatient || !consultState.transcript.length) return;
+  const section = document.getElementById('clinicianReviewSection');
+  const content = document.getElementById('clinicianReviewContent');
+  const confirmBtn = document.getElementById('confirmReviewBtn');
+  section.classList.remove('hidden');
+  confirmBtn.disabled = true;
+  content.innerHTML = '<p class="no-data plugin-loading"><span class="epic-spinner-inline"></span> Extracting ICD codes and MDM via n8n…</p>';
+  try {
+    const res = await fetch(`${N8N_BASE}/webhook/review-icd-mdm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientId:     selectedPatient.id,
+        fhirBase:      FHIR_BASE,
+        patientName:   formatPatientName(selectedPatient),
+        transcript:    buildTranscriptText(),
+        rawTranscript: consultState.transcript,
+        today:         new Date().toISOString().split('T')[0],
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw  = await res.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
+    if (data.error) throw new Error(data.error);
+    consultState.pendingReview = data;
+    content.innerHTML = renderClinicianReviewHTML(data);
+    confirmBtn.disabled = false;
+  } catch (err) {
+    content.innerHTML = `<div class="plugin-error">
+      <strong>Could not reach n8n workflow.</strong><br>
+      <small>Activate <code>review-icd-mdm</code> webhook in n8n.</small><br>
+      <small>${escapeHtml(err.message)}</small>
+    </div>`;
+  }
+}
+
+function renderClinicianReviewHTML(data) {
+  const confidenceBadge = (c) => {
+    const map = { high: '#166534', medium: '#92400e', low: '#7c3aed' };
+    const bg  = { high: '#dcfce7', medium: '#fef3c7', low: '#ede9fe' };
+    const col = map[c] || '#374151';
+    const bgc = bg[c]  || '#f3f4f6';
+    return `<span style="background:${bgc};color:${col};border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600">${c || 'medium'}</span>`;
+  };
+
+  const icdRows = (data.icdCodes || []).map((c, i) => `
+    <tr>
+      <td style="padding:8px 6px;text-align:center;">
+        <input type="checkbox" class="icd-confirm-chk" data-idx="${i}" checked style="width:16px;height:16px;cursor:pointer;">
+      </td>
+      <td style="padding:8px 6px;">
+        <input type="text" class="icd-code-input" data-idx="${i}" value="${escapeHtml(c.code)}"
+          style="width:80px;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-family:monospace;font-size:13px;">
+      </td>
+      <td style="padding:8px 6px;">
+        <input type="text" class="icd-desc-input" data-idx="${i}" value="${escapeHtml(c.description)}"
+          style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 6px;font-size:13px;">
+      </td>
+      <td style="padding:8px 6px;text-align:center;">${confidenceBadge(c.confidence)}</td>
+    </tr>`).join('');
+
+  const mdm = data.mdm || {};
+  const complexityOpts = ['low', 'moderate', 'high'].map((lv) => {
+    const checked = (mdm.complexity || '').toLowerCase() === lv ? 'checked' : '';
+    const labels  = { low: 'Low', moderate: 'Moderate', high: 'High' };
+    const colors  = { low: '#166534', moderate: '#92400e', high: '#991b1b' };
+    return `<label style="display:inline-flex;align-items:center;gap:5px;margin-right:16px;cursor:pointer;font-size:13px;color:${colors[lv]}">
+      <input type="radio" name="mdmComplexity" value="${lv}" ${checked} style="cursor:pointer;"> ${labels[lv]}
+    </label>`;
+  }).join('');
+
+  const emCode = data.emCode || {};
+  const emOptions = ['99202','99203','99204','99205','99212','99213','99214','99215'].map((c) =>
+    `<option value="${c}" ${emCode.suggested === c ? 'selected' : ''}>${c}</option>`).join('');
+
+  return `
+    <div style="font-family:system-ui,sans-serif">
+
+      <div style="margin-bottom:18px">
+        <div style="font-weight:600;font-size:13px;color:#1e3a5f;margin-bottom:8px;">ICD-10 Diagnosis Codes</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+            <thead>
+              <tr style="background:#f8fafc;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">
+                <th style="padding:6px;width:40px;">Keep</th>
+                <th style="padding:6px;width:90px;text-align:left">Code</th>
+                <th style="padding:6px;text-align:left">Description</th>
+                <th style="padding:6px;width:80px;">Confidence</th>
+              </tr>
+            </thead>
+            <tbody id="icdTableBody">
+              ${icdRows || '<tr><td colspan="4" style="padding:12px;text-align:center;color:#9ca3af;font-size:13px">No ICD codes extracted</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" id="addIcdRowBtn" class="epic-btn epic-btn-secondary" style="margin-top:8px;font-size:12px;padding:4px 10px">+ Add Code</button>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <div style="font-weight:600;font-size:13px;color:#1e3a5f;margin-bottom:8px;">Medical Decision Making (MDM)</div>
+        <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px">
+          <div style="margin-bottom:10px">
+            <span style="font-size:12px;color:#6b7280;display:block;margin-bottom:6px">Complexity Level</span>
+            <div>${complexityOpts}</div>
+          </div>
+          ${mdm.rationale ? `<div style="font-size:12px;color:#374151;margin-bottom:6px"><strong>Rationale:</strong> ${escapeHtml(mdm.rationale)}</div>` : ''}
+          ${mdm.problemsAddressed ? `<div style="font-size:12px;color:#374151;margin-bottom:6px"><strong>Problems addressed:</strong> ${escapeHtml(mdm.problemsAddressed)}</div>` : ''}
+          ${mdm.dataReviewed ? `<div style="font-size:12px;color:#374151;margin-bottom:6px"><strong>Data reviewed:</strong> ${escapeHtml(mdm.dataReviewed)}</div>` : ''}
+          ${mdm.riskOfComplications ? `<div style="font-size:12px;color:#374151"><strong>Risk:</strong> ${escapeHtml(mdm.riskOfComplications)}</div>` : ''}
+        </div>
+      </div>
+
+      <div>
+        <div style="font-weight:600;font-size:13px;color:#1e3a5f;margin-bottom:8px;">E/M Code</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <select id="emCodeSelect" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 10px;font-size:14px;font-weight:600">${emOptions}</select>
+          ${emCode.rationale ? `<span style="font-size:12px;color:#6b7280">${escapeHtml(emCode.rationale)}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function commitReviewedCodes() {
+  if (!selectedPatient) return;
+  const confirmBtn = document.getElementById('confirmReviewBtn');
+  confirmBtn.disabled = true;
+
+  // Collect clinician-confirmed ICD codes from the editable table
+  const checkedRows = document.querySelectorAll('.icd-confirm-chk:checked');
+  const resources = [];
+  checkedRows.forEach((chk) => {
+    const idx  = chk.dataset.idx;
+    const code = document.querySelector(`.icd-code-input[data-idx="${idx}"]`)?.value?.trim();
+    const desc = document.querySelector(`.icd-desc-input[data-idx="${idx}"]`)?.value?.trim();
+    if (!code && !desc) return;
+    resources.push({
+      resourceType: 'Condition',
+      clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
+      verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
+      code: {
+        coding: code ? [{ system: 'http://hl7.org/fhir/sid/icd-10', code }] : [],
+        text: desc || code,
+      },
+      subject: { reference: `Patient/${selectedPatient.id}` },
+      recordedDate: new Date().toISOString().split('T')[0],
+    });
+  });
+
+  // Collect MDM summary as a note on the encounter
+  const mdmComplexity = document.querySelector('input[name="mdmComplexity"]:checked')?.value || '';
+  const emCode = document.getElementById('emCodeSelect')?.value || '';
+
+  try {
+    if (resources.length) {
+      await Promise.all(resources.map((r) => fhirPost(r.resourceType, r)));
+    }
+    // Save MDM + E/M code as an annotation on the Encounter
+    const enc = buildConsultEncounter();
+    enc.type = [{ text: `Live Virtual Consultation — MDM: ${mdmComplexity}, E/M: ${emCode}` }];
+    await fhirPost('Encounter', enc);
+
+    showEntryFeedback(`✓ ${resources.length} ICD code(s) committed. MDM: ${mdmComplexity || '—'}, E/M: ${emCode || '—'}.`);
+    loadProblems();
+    loadOverview();
+    document.getElementById('clinicianReviewSection').classList.add('hidden');
+    consultState.pendingReview = null;
+  } catch (err) {
+    showEntryFeedback(`Failed to commit codes: ${err.message}`, 'error');
+  } finally {
+    confirmBtn.disabled = false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
