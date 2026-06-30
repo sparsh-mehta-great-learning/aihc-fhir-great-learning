@@ -1,0 +1,460 @@
+{
+  "name": "EPIC — Pre-Visit Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "pv-ifdata-01-c1",
+              "leftValue": "={{ $json.hasData }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "pv-ifdata-01",
+      "name": "PV: Has Data?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3454,
+        9328
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/MedicationRequest?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "1ff2dfec-f607-48e7-9f4c-2d78f6df70bf",
+      "name": "PV: Fetch Medications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2224,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Patient/' + ($('POST /previsit-summary').first().json.body.patientId || '') + '?_format=json' }}",
+        "options": {}
+      },
+      "id": "5d7e08c9-1eb5-4a0f-b5cb-7f9016d8ef1c",
+      "name": "PV: Fetch Patient",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "{{\n'Create a structured pre-visit summary using ONLY the patient context below.\\n\\n' +\n'PATIENT CONTEXT:\\n' +\n$json.context +\n'\\n\\n' +\n'Return the answer in exactly this format:\\n\\n' +\n'**PATIENT SNAPSHOT:**\\n' +\n'- Name:\\n' +\n'- Age:\\n' +\n'- Gender:\\n' +\n'- Key Demographics:\\n\\n' +\n'**REASON FOR VISIT:**\\n' +\n'- \\n\\n' +\n'**ACTIVE PROBLEMS:**\\n' +\n'1.\\n' +\n'2.\\n\\n' +\n'**CURRENT MEDICATIONS:**\\n' +\n'- \\n\\n' +\n'**ALLERGIES:**\\n' +\n'- \\n\\n' +\n'**RECENT VITALS SUMMARY:**\\n' +\n'- \\n\\n' +\n'**RECENT LAB HIGHLIGHTS:**\\n' +\n'- \\n\\n' +\n'**IMMUNIZATION STATUS:**\\n' +\n'- \\n\\n' +\n'**RECOMMENDED DISCUSSION POINTS:**\\n' +\n'1.\\n' +\n'2.\\n' +\n'3.\\n' +\n'4.\\n' +\n'5.'\n}}"
+            },
+            {
+              "content": "={{\n'Create a structured pre-visit summary using ONLY the patient context below.\\n\\n' +\n'PATIENT CONTEXT:\\n' +\n$json.context +\n'\\n\\n' +\n'Return the answer in exactly this format:\\n\\n' +\n'**PATIENT SNAPSHOT:**\\n' +\n'- Name:\\n' +\n'- Age:\\n' +\n'- Gender:\\n' +\n'- Key Demographics:\\n\\n' +\n'**REASON FOR VISIT:**\\n' +\n'- \\n\\n' +\n'**ACTIVE PROBLEMS:**\\n' +\n'1.\\n' +\n'2.\\n\\n' +\n'**CURRENT MEDICATIONS:**\\n' +\n'- \\n\\n' +\n'**ALLERGIES:**\\n' +\n'- \\n\\n' +\n'**RECENT VITALS SUMMARY:**\\n' +\n'- \\n\\n' +\n'**RECENT LAB HIGHLIGHTS:**\\n' +\n'- \\n\\n' +\n'**IMMUNIZATION STATUS:**\\n' +\n'- \\n\\n' +\n'**RECOMMENDED DISCUSSION POINTS:**\\n' +\n'1.\\n' +\n'2.\\n' +\n'3.\\n' +\n'4.\\n' +\n'5.'\n}}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        3568,
+        9328
+      ],
+      "id": "dd884d8b-ecfb-4712-a07d-6bd1c0d7e5f6",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&category=vital-signs&_count=10&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "da6fe023-18a9-40fb-b5c3-c73e2c20d467",
+      "name": "PV: Fetch Vitals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2448,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/AllergyIntolerance?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "dfb4fc69-17e9-44a7-8130-c4520cb48b55",
+      "name": "PV: Fetch Allergies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2896,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── PREVISIT SUMMARY — ASSEMBLE FHIR CONTEXT ───────────────────────────────\n\nconst parseJsonSafe = (value) => {\n  if (value == null) return {};\n  if (typeof value === 'string') { try { return JSON.parse(value); } catch { return {}; } }\n  return value;\n};\n\nconst parseFHIRFromNode = (nodeName) => {\n  try {\n    const raw = $(nodeName).first()?.json ?? {};\n    if (raw?.data !== undefined) return parseJsonSafe(raw.data);\n    if (raw?.body !== undefined) return parseJsonSafe(raw.body);\n    if (raw?.resourceType || raw?.entry) return raw;\n    return parseJsonSafe(raw);\n  } catch (e) { return {}; }\n};\n\nconst getResources = (bundle) =>\n  Array.isArray(bundle?.entry) ? bundle.entry.map(e => e.resource).filter(Boolean) : [];\n\nconst fmtDate = (d) => {\n  if (!d) return '—';\n  const dt = new Date(d);\n  return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });\n};\n\nconst getName = (p) => {\n  const n = p?.name?.[0];\n  if (!n) return 'Unknown';\n  return [...(n.given || []), n.family].filter(Boolean).join(' ');\n};\n\nconst getAge = (birthDate) => {\n  if (!birthDate) return '?';\n  const dob = new Date(birthDate);\n  if (isNaN(dob.getTime())) return '?';\n  const today = new Date();\n  let age = today.getFullYear() - dob.getFullYear();\n  const m = today.getMonth() - dob.getMonth();\n  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;\n  return age;\n};\n\nconst getCodeText = (r) => r?.code?.text || r?.code?.coding?.[0]?.display || r?.code?.coding?.[0]?.code || '?';\nconst getMedicationText = (m) => m?.medicationCodeableConcept?.text || m?.medicationCodeableConcept?.coding?.[0]?.display || m?.medication?.concept?.text || '?';\nconst getAllergyText = (a) => a?.code?.text || a?.code?.coding?.[0]?.display || 'Unknown allergy';\nconst getImmunizationText = (i) => i?.vaccineCode?.text || i?.vaccineCode?.coding?.[0]?.display || '?';\n\nconst getObsValue = (obs) => {\n  if (obs?.valueQuantity?.value !== undefined)\n    return `${Number(obs.valueQuantity.value).toFixed(1)} ${obs.valueQuantity.unit || ''}`.trim();\n  if (obs?.valueString) return obs.valueString;\n  if (obs?.valueCodeableConcept?.text) return obs.valueCodeableConcept.text;\n  if (Array.isArray(obs?.component)) {\n    let sys = null, dia = null;\n    for (const c of obs.component) {\n      const label = (c?.code?.text || c?.code?.coding?.[0]?.display || '').toLowerCase();\n      const val = c?.valueQuantity?.value;\n      const unit = c?.valueQuantity?.unit || 'mm[Hg]';\n      if (label.includes('systolic')) sys = `${Math.round(val)} ${unit}`;\n      if (label.includes('diastolic')) dia = `${Math.round(val)} ${unit}`;\n    }\n    if (sys || dia) return `${sys ? 'Sys ' + sys : ''}${sys && dia ? ' / ' : ''}${dia ? 'Dia ' + dia : ''}`;\n  }\n  return '—';\n};\n\nconst patient    = parseFHIRFromNode('PV: Fetch Patient');\nconst condB      = parseFHIRFromNode('PV: Fetch Conditions');\nconst medB       = parseFHIRFromNode('PV: Fetch Medications');\nconst vitalB     = parseFHIRFromNode('PV: Fetch Vitals');\nconst labB       = parseFHIRFromNode('PV: Fetch Labs');\nconst allergyB   = parseFHIRFromNode('PV: Fetch Allergies');\nconst immB       = parseFHIRFromNode('PV: Fetch Immunizations');\n\nconst conditionsRaw    = getResources(condB);\nconst medicationsRaw   = getResources(medB);\nconst vitalsRaw        = getResources(vitalB);\nconst labsRaw          = getResources(labB);\nconst allergiesRaw     = getResources(allergyB);\nconst immunizationsRaw = getResources(immB);\n\nconst conditions = conditionsRaw.map(c =>\n  `${getCodeText(c)} (${c?.clinicalStatus?.coding?.[0]?.code || c?.clinicalStatus?.text || 'active'})`\n);\n\nconst medications = medicationsRaw.map(m => {\n  const d = m?.dosageInstruction?.[0];\n  const doseVal = d?.doseAndRate?.[0]?.doseQuantity?.value;\n  const doseUnit = d?.doseAndRate?.[0]?.doseQuantity?.unit || '';\n  const dose = d?.text || (doseVal != null ? `${doseVal} ${doseUnit}`.trim() : 'as directed');\n  const asNeeded = d?.asNeededBoolean ? ' as needed' : '';\n  return `${getMedicationText(m)} — ${dose}${asNeeded}`;\n});\n\nconst vitals = vitalsRaw.slice(0, 8).map(v =>\n  `${getCodeText(v)}: ${getObsValue(v)} (${fmtDate(v.effectiveDateTime || v.issued)})`\n);\n\nconst labs = labsRaw.slice(0, 8).map(l =>\n  `${getCodeText(l)}: ${getObsValue(l)} (${fmtDate(l.effectiveDateTime || l.issued)})`\n);\n\nconst allergies = allergiesRaw.map(a =>\n  `${getAllergyText(a)} (${a?.criticality || a?.reaction?.[0]?.severity || '—'})`\n);\n\nconst imms = immunizationsRaw.map(i =>\n  `${getImmunizationText(i)} on ${fmtDate(i.occurrenceDateTime || i.recorded)}`\n);\n\nconst patientInfo = `Name: ${getName(patient)} | DOB: ${patient?.birthDate || '?'} | Age: ${getAge(patient?.birthDate)} | Gender: ${patient?.gender || '?'} | MRN: ${patient?.id || '?'}`;\n\nconst context = [\n  `PATIENT: ${patientInfo}`,\n  `\\nACTIVE CONDITIONS (${conditions.length}):\\n${conditions.join('\\n') || 'None recorded'}`,\n  `\\nACTIVE MEDICATIONS (${medications.length}):\\n${medications.join('\\n') || 'None recorded'}`,\n  `\\nALLERGIES:\\n${allergies.join('\\n') || 'NKDA'}`,\n  `\\nRECENT VITALS:\\n${vitals.join('\\n') || 'None recorded'}`,\n  `\\nRECENT LABS:\\n${labs.join('\\n') || 'None recorded'}`,\n  `\\nIMMUNIZATIONS:\\n${imms.join('\\n') || 'None recorded'}`,\n].join('\\n');\n\nconst hasData = (conditions.length + medications.length + vitals.length + labs.length + allergies.length + imms.length) > 0;\nreturn [{ json: { context, patientName: getName(patient), hasData } }];"
+      },
+      "id": "5186deb8-fa1a-475b-a437-ca7787154e70",
+      "name": "PV: Assemble Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        9328
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Condition?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "5759b5be-0b54-4eac-9784-31773df2e7d5",
+      "name": "PV: Fetch Conditions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2000,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── FORMAT PRE-VISIT SUMMARY HTML ──────────────────────────────────────────\nconst input = $input.first().json;\n\nlet text = '';\n\ntry {\n  const output = input.output;\n  if (typeof output === 'string') {\n    text = output;\n  } else if (Array.isArray(output)) {\n    for (const msg of output) {\n      if (Array.isArray(msg?.content)) {\n        for (const block of msg.content) {\n          if (block?.type === 'output_text' && block?.text) text += block.text;\n        }\n      } else if (typeof msg?.text === 'string') {\n        text += msg.text;\n      }\n    }\n  } else if (typeof output === 'object' && output !== null) {\n    if (Array.isArray(output?.content)) {\n      for (const block of output.content) {\n        if (block?.type === 'output_text' && block?.text) text += block.text;\n      }\n    } else if (typeof output?.text === 'string') {\n      text = output.text;\n    }\n  }\n  if (!text) text = input.text || input.message || input.content || '';\n} catch (e) { text = ''; }\n\nif (!text) {\n  return [{ json: { html: `<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>AI Agent error:</strong> No response received. Check that OpenAI credentials are configured.</div>` } }];\n}\n\nconst lines = text.split('\\n');\nlet html = '<div style=\"font-family:system-ui,sans-serif;line-height:1.6\">';\nhtml += `<div style=\"background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#166534\">🩺 AI-generated pre-visit brief based on FHIR patient record. Review before seeing patient.</div>`;\n\nfor (const line of lines) {\n  const trimmed = line.trim();\n  if (!trimmed) { html += '<br>'; continue; }\n  if (/^[A-Z][A-Z \\/(\\\\-]{4,}:?$/.test(trimmed) || (trimmed.startsWith('**') && trimmed.endsWith('**'))) {\n    const label = trimmed.replace(/^\\*\\*|\\*\\*$/g,'').replace(/:$/,'');\n    html += `<div style=\"margin-top:16px;margin-bottom:6px;font-size:13px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #dcfce7;padding-bottom:4px\">${label}</div>`;\n  } else if (trimmed.startsWith('- ') || trimmed.startsWith('• ') || /^\\d+\\./.test(trimmed)) {\n    const item = trimmed.replace(/^[-•]\\s+/,'').replace(/^\\d+\\.\\s*/,'');\n    html += `<div style=\"padding:3px 0 3px 14px;border-left:3px solid #bbf7d0;margin:2px 0;font-size:13px;color:#1e293b\">${item}</div>`;\n  } else {\n    html += `<p style=\"margin:4px 0;font-size:13px;color:#1e293b\">${trimmed}</p>`;\n  }\n}\nhtml += '</div>';\nreturn [{ json: { html } }];"
+      },
+      "id": "3adc837a-11b7-4e95-a714-beb419eab14a",
+      "name": "PV: Format HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3920,
+        9328
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Immunization?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&_count=20&_format=json' }}",
+        "options": {}
+      },
+      "id": "7c4ce9d1-2a3b-4e67-ab7e-06787cd1987d",
+      "name": "PV: Fetch Immunizations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        3120,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d24304c3-fbda-4acc-bcb5-6a1d5768fdaa",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        7776
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\"panels\": [{\"id\": \"previsit\", \"label\": \"Pre-Visit Summary\", \"title\": \"AI Pre-Visit Brief\", \"description\": \"AI-generated pre-visit briefing for providers\", \"webhook\": \"previsit-summary\", \"trigger\": \"button\", \"buttonLabel\": \"Generate Pre-Visit Brief\"}]}) }}",
+        "options": {}
+      },
+      "id": "8e9f43d6-8061-48b2-ac5a-82c9ae9c5209",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        7776
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "previsit-summary",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fa395447-da08-4e15-b48e-6ca3072de51f",
+      "name": "POST /previsit-summary",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        9328
+      ],
+      "webhookId": "previsit-summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { html: `<div style='padding:16px;background:#fffbeb;border:1px solid #fde047;border-radius:8px;color:#854d0e'><strong>Insufficient data.</strong> No conditions, medications, vitals, labs, allergies, or immunizations were retrieved for this patient, so no pre-visit brief was generated. Check the patient ID and FHIR connectivity before retrying.</div>` } }];"
+      },
+      "id": "pv-empty-01",
+      "name": "PV: Empty Notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3564,
+        9588
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($('POST /previsit-summary').first().json.body.patientId || '') + '&category=laboratory&_count=10&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "d59843a4-e386-4694-bc7e-15c389033619",
+      "name": "PV: Fetch Labs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2672,
+        9328
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "b135c731-b197-49fe-853a-9b5dbc444c47",
+      "name": "PV: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        4144,
+        9328
+      ]
+    }
+  ],
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /previsit-summary": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Patient": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Conditions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Conditions": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Medications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Medications": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Vitals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Vitals": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Labs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Labs": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Allergies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Allergies": {
+      "main": [
+        [
+          {
+            "node": "PV: Fetch Immunizations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Fetch Immunizations": {
+      "main": [
+        [
+          {
+            "node": "PV: Assemble Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Assemble Context": {
+      "main": [
+        [
+          {
+            "node": "PV: Has Data?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "PV: Format HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Format HTML": {
+      "main": [
+        [
+          {
+            "node": "PV: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Has Data?": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PV: Empty Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PV: Empty Notice": {
+      "main": [
+        [
+          {
+            "node": "PV: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

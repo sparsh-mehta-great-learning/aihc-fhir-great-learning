@@ -1,0 +1,980 @@
+{
+  "name": "EPIC — Live Consultation",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "acd066bf-983f-4292-a1a3-46fe4ecf391d",
+      "name": "CN: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        8448
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "virtual-doctor-turn",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "84aa9405-b868-4d60-94ed-1e696e5dcd2d",
+      "name": "POST /virtual-doctor-turn",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        7552
+      ],
+      "webhookId": "d5ad134f-27a1-476b-a9d0-aea6669ed12f"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a second, independent ED E/M coding reviewer (CPT 99281-99285, MDM only; time-based coding not allowed in the ED). Score the three MDM axes from scratch without assuming any prior result. Axis 1 = number/complexity of problems addressed; Axis 2 = amount/complexity of data reviewed; Axis 3 = risk of management. Levels: straightforward, low, moderate, high. Return ONLY valid JSON, no markdown:\n{ \"axes\": { \"axis1\": {\"level\":\"\",\"confidence\":0,\"citations\":[]}, \"axis2\": {\"level\":\"\",\"confidence\":0,\"citations\":[]}, \"axis3\": {\"level\":\"\",\"confidence\":0,\"citations\":[]} } }"
+            },
+            {
+              "content": "={{ 'Independently score the three ED MDM axes from the material below.\\n\\nSOAP NOTE:\\n' + ($('CN: Parse Faithfulness').first().json.soapHtml || '') + '\\n\\nTRANSCRIPT:\\n' + ($('CN: Parse Faithfulness').first().json.transcript || '') }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "cn-scoreb-01",
+      "name": "CN: Score E/M B",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        1056
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── CLINICAL NOTES — Extract transcript ─────────────────────────────────────\nconst body = $input.first().json.body || $input.first().json;\nconst patientId   = body.patientId   || '';\nconst patientName = body.patientName || 'Unknown';\nconst fhirBase    = body.fhirBase    || 'http://r4:8080/hapi-fhir-jpaserver/fhir';\nconst transcript  = body.transcript  || '';\nconst rawTranscript = Array.isArray(body.rawTranscript) ? body.rawTranscript : [];\n\nif (!transcript && rawTranscript.length === 0) {\n  throw new Error('transcript or rawTranscript is required');\n}\n\n// Build readable transcript from rawTranscript if plain text not provided\nconst text = transcript || rawTranscript.map(t => `[${t.time || ''}] ${t.speaker}: ${t.text}`).join('\\n');\n\nreturn [{ json: { patientId, patientName, fhirBase, transcript: text } }];\n"
+      },
+      "id": "3eb46e27-6de6-4369-9022-11dce36718a6",
+      "name": "CN: Prepare Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        8448
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical coding specialist. Analyze the consultation transcript and extract the ICD-10 codes, Medical Decision Making (MDM) complexity, and E/M code. Return ONLY valid JSON with this exact schema (no markdown, no explanation):\n{\n  \"icdCodes\": [\n    { \"code\": \"E11.9\", \"description\": \"Type 2 diabetes mellitus without complications\", \"confidence\": \"high\" }\n  ],\n  \"mdm\": {\n    \"complexity\": \"low|moderate|high\",\n    \"rationale\": \"brief explanation\",\n    \"problemsAddressed\": \"description of problems managed\",\n    \"dataReviewed\": \"what data was reviewed or ordered\",\n    \"riskOfComplications\": \"minimal|low|moderate|high\"\n  },\n  \"emCode\": {\n    \"suggested\": \"99213\",\n    \"rationale\": \"brief rationale for E/M level\"\n  }\n}\nRules:\n- Include only ICD-10 codes for conditions clearly discussed or assessed in the transcript\n- confidence: high (explicitly stated), medium (strongly implied), low (possible but uncertain)\n- MDM complexity: low (1 self-limited problem, minimal data, minimal risk), moderate (1+ chronic stable, limited data, low risk), high (1+ chronic unstable/new diagnosis, extensive data, moderate-high risk)\n- E/M codes: 99202-99205 for new patients, 99212-99215 for established patients\n- Do not invent clinical details not present in the transcript"
+            },
+            {
+              "content": "={{ 'Extract ICD-10 codes, MDM, and E/M code for patient ' + $json.patientName + ' (ID: ' + $json.patientId + ') from this consultation transcript:\\n\\n' + $json.transcript }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "rc-ai-01",
+      "name": "RC: AI Extract Codes",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        9552
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── CHART UPDATES — Build FHIR resources + HTML summary ────────────────────\nconst aiInput   = $input.first().json;\nconst prev      = $('CU: Prepare Transcript').first().json;\nconst patientId = prev.patientId;\n\nfunction extractRawText(inp) {\n  if (Array.isArray(inp.output)) {\n    for (const msg of inp.output) {\n      if (Array.isArray(msg.content)) {\n        for (const block of msg.content) { if (block.text) return block.text; }\n      }\n      if (typeof msg.text === 'string') return msg.text;\n    }\n  }\n  if (inp.message?.content)                                  return inp.message.content;\n  if (Array.isArray(inp.choices) && inp.choices[0]?.message?.content)\n                                                             return inp.choices[0].message.content;\n  if (typeof inp.text    === 'string') return inp.text;\n  if (typeof inp.content === 'string') return inp.content;\n  if (typeof inp.output  === 'string') return inp.output;\n  return JSON.stringify(inp);\n}\n\nlet parsed = { summary: '', resources: [] };\ntry {\n  const rawText = extractRawText(aiInput);\n  const clean = rawText.replace(/```json|```/g,'').trim();\n  // Extract between first { and last } for robustness\n  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');\n  const jsonStr = (s !== -1 && e > s) ? clean.substring(s, e + 1) : clean;\n  parsed = JSON.parse(jsonStr);\n} catch(e) {\n  parsed.summary = 'Could not parse AI response: ' + e.message;\n}\n\nconst resources = (parsed.resources || []).map(r => {\n  if (r.subject?.reference === 'Patient/PATIENT_ID') {\n    r.subject.reference = 'Patient/' + patientId;\n  }\n  return r;\n});\n\nconst typeColors = {\n  Condition: '#2563eb', MedicationRequest: '#7c3aed',\n  Observation: '#0891b2', AllergyIntolerance: '#dc2626'\n};\nconst typeIcons = {\n  Condition: '🩺', MedicationRequest: '💊',\n  Observation: '📊', AllergyIntolerance: '⚠️'\n};\n\nconst rows = resources.map(r => {\n  const rt    = r.resourceType || 'Unknown';\n  const name  = r.code?.text || r.medicationCodeableConcept?.text || '—';\n  const color = typeColors[rt] || '#6b7280';\n  const icon  = typeIcons[rt]  || '📋';\n  return `<div style=\"display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #f0f0f0\">\n    <span style=\"font-size:16px\">${icon}</span>\n    <span style=\"font-weight:500;font-size:13px\">${name}</span>\n    <span style=\"margin-left:auto;background:${color}20;color:${color};border:1px solid ${color}40;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600\">${rt}</span>\n  </div>`;\n}).join('');\n\nconst html = `<div style=\"font-family:system-ui,sans-serif\">\n  <div style=\"background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#854d0e;font-size:12px\">\n    ⚠️ Proposed chart updates — review carefully before saving to FHIR\n  </div>\n  <div style=\"margin-bottom:12px;font-size:13px;color:#374151\">${parsed.summary || 'No summary generated.'}</div>\n  ${resources.length > 0 ? `<div style=\"border:1px solid #e5e7eb;border-radius:8px;overflow:hidden\">${rows}</div>` : '<p style=\"color:#9ca3af;font-size:13px\">No chart updates extracted.</p>'}\n</div>`;\n\nreturn [{ json: { html, resources, summary: parsed.summary } }];\n"
+      },
+      "id": "42fff5e2-bd87-4ad5-ab68-95728436909f",
+      "name": "CU: Build FHIR + HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        9104
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "b47ddf54-aa93-48cf-b010-aa75d7df0a12",
+      "name": "CU: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        9104
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── RD: Log Decision — capture accept/modify/reject at sign-off ─────────────\n// Wire a Postgres / Google Sheets / FHIR Provenance node after this to persist.\nconst b = $input.first().json.body || $input.first().json;\nconst rec = {\n  ts: new Date().toISOString(),\n  patientId: b.patientId || '', reviewer: b.reviewer || b.physician || 'unknown',\n  suggestedCode: b.suggestedCode || '', suggestedLevel: b.suggestedLevel || '',\n  finalCode: b.finalCode || b.acceptedCode || '', finalLevel: b.finalLevel || '',\n  axes: b.axes || null\n};\nrec.action = b.action || (rec.finalCode && rec.suggestedCode\n  ? (rec.finalCode===rec.suggestedCode?'accept':'modify') : 'unknown');\nrec.agreement = !!(rec.suggestedCode && rec.finalCode && rec.suggestedCode===rec.finalCode);\nreturn [{ json: { recorded:true, record:rec, agreement:rec.agreement,\n  delta:(rec.suggestedCode||'?')+' -> '+(rec.finalCode||'?') } }];\n"
+      },
+      "id": "rd-log-01",
+      "name": "RD: Log Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        10720
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "score-eval",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ev-wh-01",
+      "name": "POST /score-eval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        10960
+      ],
+      "webhookId": "score-eval"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-clinical-notes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "8a72dc17-d6fc-4a4b-bc1d-0cc4ce085176",
+      "name": "POST /generate-clinical-notes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        8448
+      ],
+      "webhookId": "generate-clinical-notes"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "review-icd-mdm",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "rc-webhook-01",
+      "name": "POST /review-icd-mdm",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        9552
+      ],
+      "webhookId": "review-icd-mdm"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── CN: Parse Faithfulness — read judge verdict, carry note + transcript ────\nconst ai = $input.first().json;\nfunction extractRawText(inp){\n  if(Array.isArray(inp.output)){for(const m of inp.output){if(Array.isArray(m.content)){for(const b of m.content){if(b.text)return b.text;}}if(typeof m.text==='string')return m.text;}}\n  if(inp.message&&inp.message.content) return inp.message.content;\n  if(Array.isArray(inp.choices)&&inp.choices[0]&&inp.choices[0].message&&inp.choices[0].message.content) return inp.choices[0].message.content;\n  if(typeof inp.text==='string')return inp.text;\n  if(typeof inp.content==='string')return inp.content;\n  if(typeof inp.output==='string')return inp.output;\n  return JSON.stringify(inp);\n}\nlet faith = { faithful:null, score:null, unsupported:[], notes:'unparsed' };\ntry {\n  const raw = extractRawText(ai).replace(/```json|```/g,'').trim();\n  const s = raw.indexOf('{'), e = raw.lastIndexOf('}');\n  faith = JSON.parse(s!==-1 && e>s ? raw.substring(s,e+1) : raw);\n} catch(err){ faith = { faithful:null, score:null, unsupported:[], notes:'parse error: '+err.message }; }\nconst src = $('CN: Extract SOAP').first().json;\nreturn [{ json: {\n  soapHtml: src.soapHtml || '', transcript: src.transcript || '',\n  patientId: src.patientId || '', patientName: src.patientName || '',\n  faithfulness: faith\n} }];\n"
+      },
+      "id": "cn-parsef-01",
+      "name": "CN: Parse Faithfulness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        1480
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "record-coding-decision",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "rd-wh-01",
+      "name": "POST /record-coding-decision",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        10720
+      ],
+      "webhookId": "record-coding-decision"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "rc-respond-01",
+      "name": "RC: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        9552
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical informatics specialist. Extract structured chart updates from the consultation transcript. Return ONLY valid JSON (no markdown, no explanation) with this schema:\n{\n  \"summary\": \"brief plain-text summary of proposed updates\",\n  \"resources\": [\n    {\n      \"resourceType\": \"Condition|MedicationRequest|Observation|AllergyIntolerance\",\n      \"clinicalStatus\": { \"coding\": [{ \"code\": \"active\" }] },\n      \"code\": { \"text\": \"condition or medication name\" },\n      \"subject\": { \"reference\": \"Patient/PATIENT_ID\" }\n    }\n  ]\n}\nRules:\n- Replace PATIENT_ID with the actual patient ID provided\n- Only include items clearly mentioned in the transcript\n- Use resourceType: Condition for diagnoses, MedicationRequest for medications, Observation for vitals/labs, AllergyIntolerance for allergies\n- Do not invent clinical details"
+            },
+            {
+              "content": "={{ 'Extract chart updates for patient ' + $json.patientName + ' (ID: ' + $json.patientId + ') from this consultation transcript:\\n\\n' + $json.transcript }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "e8ed7f72-4446-47eb-ba3d-de35284f5605",
+      "name": "CU: AI Extract Updates",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        9104
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── EV: Compute Metrics — score system output against an adjudicated gold ───\n// gap 3: axis-level agreement + exact-match vs off-by-one on the final code\n// gap 2: feed accumulated results from here to calibrate the confidence threshold\nconst b = $input.first().json.body || $input.first().json;\nconst sug = b.suggested || {}; const gold = b.gold || {};\nconst CODE_RANK = {'99281':0,'99282':1,'99283':2,'99284':3,'99285':4};\nconst lvl = (x) => x==null ? null : String(x.level!==undefined?x.level:x).toLowerCase();\n\nconst sa = sug.axes||{}, ga = gold.axes||{};\nconst axisResults=[]; let match=0, tot=0;\nfor (const k of ['axis1','axis2','axis3']) {\n  const s = lvl(sa[k]), g = lvl(ga[k]);\n  if (s && g) { tot++; const m = s===g; if(m) match++; axisResults.push({axis:k, suggested:s, gold:g, match:m}); }\n}\nconst sc = sug.code || sug.finalCode || '';\nconst gc = gold.code || '';\nconst exactMatch = (sc && gc) ? (sc===gc) : null;\nlet offByOne = null;\nif (sc in CODE_RANK && gc in CODE_RANK) offByOne = Math.abs(CODE_RANK[sc]-CODE_RANK[gc]) <= 1;\nreturn [{ json: {\n  ts: new Date().toISOString(), patientId: b.patientId||'',\n  axisResults, axisMatched: match, axisTotal: tot,\n  axisAgreement: tot ? match/tot : null,\n  suggestedCode: sc, goldCode: gc, exactMatch, offByOne\n} }];\n"
+      },
+      "id": "ev-calc-01",
+      "name": "EV: Compute Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        10960
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "3990566a-b72c-4d3a-a751-32ca856c0d13",
+      "name": "VD: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2576,
+        7552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── CN: Verify + Reconcile ──────────────────────────────────────────────────\n// gap 1: drop MDM citations not present in the source; lower that axis confidence\n// gap 4b: compare two independent scorers; disagreement also lowers confidence\n// so the existing 0.75 gate routes ungrounded OR contested axes to a human query\nfunction extractRawText(inp){\n  if(Array.isArray(inp.output)){for(const m of inp.output){if(Array.isArray(m.content)){for(const b of m.content){if(b.text)return b.text;}}if(typeof m.text==='string')return m.text;}}\n  if(inp.message&&inp.message.content) return inp.message.content;\n  if(Array.isArray(inp.choices)&&inp.choices[0]&&inp.choices[0].message&&inp.choices[0].message.content) return inp.choices[0].message.content;\n  if(typeof inp.text==='string')return inp.text;\n  if(typeof inp.content==='string')return inp.content;\n  if(typeof inp.output==='string')return inp.output;\n  return JSON.stringify(inp);\n}\nfunction parseAxes(node){\n  try { const raw = extractRawText(node).replace(/```json|```/g,'').trim();\n    const s=raw.indexOf('{'), e=raw.lastIndexOf('}');\n    return JSON.parse(s!==-1&&e>s?raw.substring(s,e+1):raw).axes; } catch(e){ return null; }\n}\nconst norm = (s) => String(s==null?'':s)\n  .replace(/<[^>]+>/g,' ').replace(/&[a-z]+;/gi,' ')\n  .replace(/[\\u2018\\u2019\\u201c\\u201d]/g,\"'\").replace(/\\s+/g,' ').trim().toLowerCase();\n\nconst A = parseAxes($('CN: Score E/M').first().json);          // primary scorer\nconst B = parseAxes($('CN: Score E/M B').first().json);        // second scorer\nconst prep = $('CN: Parse Faithfulness').first().json;\nconst source = norm((prep.soapHtml||'') + ' ' + (prep.transcript||''));\nconst THRESHOLD = 0.75;\n\nlet citTotal=0, citVerified=0; const adjusted=[]; const agreement=[];\nif (A) {\n  for (const k of ['axis1','axis2','axis3']) {\n    const a = A[k]; if (!a) continue;\n    // citation grounding\n    const cites = Array.isArray(a.citations) ? a.citations : [];\n    const kept=[]; let dropped=0;\n    for (const q of cites) { citTotal++; const nq=norm(q);\n      if (nq.length>=8 && source.includes(nq)) { citVerified++; kept.push(q); } else dropped++; }\n    a.citations = kept;\n    // cross-scorer agreement\n    const al = String(a.level||'').toLowerCase();\n    const bl = (B && B[k]) ? String(B[k].level||'').toLowerCase() : null;\n    const disagree = bl ? (bl !== al) : false;\n    agreement.push({ axis:k, primary:al, secondary:bl, agree: bl ? (bl===al) : null });\n    // adjust confidence on either signal\n    let conf = Number(a.confidence)||0; const reasons=[];\n    if (dropped>0) { reasons.push(dropped+' ungrounded citation(s)'); conf = Math.min(conf, kept.length===0?0.4:0.6); }\n    if (disagree) { reasons.push('scorer disagreement ('+al+' vs '+bl+')'); conf = Math.min(conf, 0.5); }\n    if (reasons.length) { a.confidence = conf; adjusted.push({ axis:k, newConfidence:conf, reasons }); }\n  }\n}\nconst faith = prep.faithfulness || {};\nconst agreed = agreement.filter(x=>x.agree===true).length;\nconst comparable = agreement.filter(x=>x.agree!==null).length;\nconst validation = {\n  faithful: (faith.faithful!==undefined?faith.faithful:null),\n  faithScore: (faith.score!==undefined?faith.score:null),\n  unsupported: Array.isArray(faith.unsupported)?faith.unsupported:[],\n  citationsTotal: citTotal, citationsVerified: citVerified, citationsDropped: citTotal-citVerified,\n  scorerAgreement: agreement, scorerAgreed: agreed, scorerComparable: comparable,\n  axesAdjusted: adjusted, threshold: THRESHOLD\n};\nreturn [{ json: { text: JSON.stringify({ axes: A || {} }), validation } }];\n"
+      },
+      "id": "cn-verify-01",
+      "name": "CN: Verify + Reconcile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── CLINICAL NOTES — Extract SOAP text, carry transcript ───────────────\nconst ai = $input.first().json;\n\nfunction extractRawText(inp){\n  if(Array.isArray(inp.output)){for(const m of inp.output){if(Array.isArray(m.content)){for(const b of m.content){if(b.text)return b.text;}}if(typeof m.text==='string')return m.text;}}\n  if(inp.message&&inp.message.content) return inp.message.content;\n  if(Array.isArray(inp.choices)&&inp.choices[0]&&inp.choices[0].message&&inp.choices[0].message.content) return inp.choices[0].message.content;\n  if(typeof inp.text==='string')return inp.text;\n  if(typeof inp.content==='string')return inp.content;\n  if(typeof inp.output==='string')return inp.output;\n  return JSON.stringify(inp);\n}\n\nconst soapHtml = (extractRawText(ai) || '').replace(/```html|```/g,'').trim();\nconst prep = $('CN: Prepare Transcript').first().json;\nreturn [{ json: { soapHtml, transcript: prep.transcript || '', patientId: prep.patientId || '', patientName: prep.patientName || '' } }];\n"
+      },
+      "id": "cn-extract-soap-01",
+      "name": "CN: Extract SOAP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical documentation specialist. Generate a SOAP-format clinical note from the consultation transcript provided. Return ONLY an HTML string (no markdown, no JSON wrapper) using this structure:\n<div>\n  <h4>S – Subjective</h4><p>Patient's chief complaint and history in their words...</p>\n  <h4>O – Objective</h4><p>Objective findings mentioned (vitals, observations)...</p>\n  <h4>A – Assessment</h4><p>Clinical impression and diagnoses discussed...</p>\n  <h4>P – Plan</h4><p>Treatment plan, medications ordered, follow-up...</p>\n</div>\nUse clean HTML. Do not invent clinical details not present in the transcript."
+            },
+            {
+              "content": "={{ 'Generate a SOAP clinical note for patient ' + $json.patientName + ' (ID: ' + $json.patientId + ') from this consultation transcript:\\n\\n' + $json.transcript }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "850fe2f1-e0f7-46c6-9196-b329de14aa09",
+      "name": "CN: AI Generate SOAP Note",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        8448
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── ICD/MDM REVIEW — Parse AI output and return structured JSON ─────────────\nconst aiInput   = $input.first().json;\nconst prev      = $('RC: Prepare Transcript').first().json;\nconst patientId = prev.patientId;\n\nfunction extractRawText(inp) {\n  if (Array.isArray(inp.output)) {\n    for (const msg of inp.output) {\n      if (Array.isArray(msg.content)) {\n        for (const block of msg.content) { if (block.text) return block.text; }\n      }\n      if (typeof msg.text === 'string') return msg.text;\n    }\n  }\n  if (inp.message?.content) return inp.message.content;\n  if (Array.isArray(inp.choices) && inp.choices[0]?.message?.content)\n    return inp.choices[0].message.content;\n  if (typeof inp.text    === 'string') return inp.text;\n  if (typeof inp.content === 'string') return inp.content;\n  if (typeof inp.output  === 'string') return inp.output;\n  return JSON.stringify(inp);\n}\n\nlet parsed = { icdCodes: [], mdm: {}, emCode: {} };\ntry {\n  const rawText = extractRawText(aiInput);\n  const clean = rawText.replace(/```json|```/g,'').trim();\n  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');\n  const jsonStr = (s !== -1 && e > s) ? clean.substring(s, e + 1) : clean;\n  parsed = JSON.parse(jsonStr);\n} catch(e) {\n  parsed.error = 'Could not parse AI response: ' + e.message;\n}\n\nconst icdCodes = (parsed.icdCodes || []).map(c => ({\n  code: c.code || '',\n  description: c.description || '',\n  confidence: c.confidence || 'medium',\n  confirmed: true\n}));\n\nconst mdm = parsed.mdm || {};\nconst emCode = parsed.emCode || {};\n\nreturn [{ json: { patientId, icdCodes, mdm, emCode, error: parsed.error || null } }];\n"
+      },
+      "id": "rc-build-01",
+      "name": "RC: Build Review Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        9552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── ICD/MDM REVIEW — Prepare transcript ────────────────────────────────────\nconst body = $input.first().json.body || $input.first().json;\nconst patientId   = body.patientId   || '';\nconst patientName = body.patientName || 'Unknown';\nconst fhirBase    = body.fhirBase    || 'http://r4:8080/hapi-fhir-jpaserver/fhir';\nconst transcript  = body.transcript  || '';\nconst rawTranscript = Array.isArray(body.rawTranscript) ? body.rawTranscript : [];\nconst text = transcript || rawTranscript.map(t => `[${t.time || ''}] ${t.speaker}: ${t.text}`).join('\\n');\nif (!text) throw new Error('transcript or rawTranscript is required');\nreturn [{ json: { patientId, patientName, fhirBase, transcript: text } }];\n"
+      },
+      "id": "rc-prep-01",
+      "name": "RC: Prepare Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        9552
+      ]
+    },
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d24304c3-fbda-4acc-bcb5-6a1d5768fdaa",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        7776
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "ev-resp-01",
+      "name": "EV: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        10960
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\"panels\": [{\"id\": \"live-consult\", \"label\": \"🎙 Live Consultation\", \"title\": \"Live Doctor–Patient Consultation\", \"description\": \"Real-time transcription with AI clinical notes and chart updates\", \"trigger\": \"builtin\"}]}) }}",
+        "options": {}
+      },
+      "id": "8e9f43d6-8061-48b2-ac5a-82c9ae9c5209",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        7776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── VIRTUAL DOCTOR — Prepare context ────────────────────────────────────────\nconst body        = $input.first().json.body || $input.first().json;\nconst patientId   = body.patientId   || '';\nconst patientName = body.patientName || 'Unknown';\nconst fhirBase    = body.fhirBase    || '';\nconst patientInput = body.patientInput || '';\nconst transcript  = body.transcript  || '';\nconst today       = body.today       || new Date().toISOString().split('T')[0];\n\n// Count how many AI turns have happened (to know when to wrap up)\nconst rawTranscript = body.rawTranscript || [];\nconst aiTurns = rawTranscript.filter(e => e.speaker === 'ai-doctor').length;\n\nreturn [{\n  json: {\n    patientId,\n    patientName,\n    fhirBase,\n    patientInput,\n    transcript,\n    rawTranscript,\n    aiTurns,\n    today,\n    isStart: patientInput === 'START_CONSULTATION',\n  }\n}];\n"
+      },
+      "id": "61f17bce-04b3-4df7-814c-f35cd4e2780d",
+      "name": "VD: Prepare Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        7552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── CHART UPDATES — Extract transcript ──────────────────────────────────────\nconst body = $input.first().json.body || $input.first().json;\nconst patientId   = body.patientId   || '';\nconst patientName = body.patientName || 'Unknown';\nconst fhirBase    = body.fhirBase    || 'http://r4:8080/hapi-fhir-jpaserver/fhir';\nconst transcript  = body.transcript  || '';\nconst rawTranscript = Array.isArray(body.rawTranscript) ? body.rawTranscript : [];\nconst text = transcript || rawTranscript.map(t => `[${t.time || ''}] ${t.speaker}: ${t.text}`).join('\\n');\n\nif (!text) throw new Error('transcript or rawTranscript is required');\nreturn [{ json: { patientId, patientName, fhirBase, transcript: text } }];\n"
+      },
+      "id": "040300ec-8f3c-4acb-b2a9-f4139e5b5295",
+      "name": "CU: Prepare Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        9104
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an E/M coding assistant for 2023 AMA Emergency Department visits (CPT 99281-99285), where the code is selected by Medical Decision Making (MDM) only; time-based coding is not allowed in the ED. From the SOAP note and transcript, score the three MDM elements INDEPENDENTLY.\nAxis 1 = number and complexity of problems addressed (Assessment).\nAxis 2 = amount and complexity of data reviewed and analyzed (Objective and Plan).\nAxis 3 = risk of complications, morbidity or mortality of management (Plan).\nLevels (use exactly one per axis): straightforward, low, moderate, high.\nFor EACH axis return: level, confidence (0 to 1), and a 'citations' array of 1 to 3 SHORT VERBATIM quotes copied EXACTLY from the note or transcript that justify that level. These quotes are the evidence the code is based on. If you cannot find supporting text, use an empty citations array and a lower confidence.\nReturn ONLY valid JSON, no markdown:\n{ \"axes\": { \"axis1\": {\"level\":\"\",\"confidence\":0,\"citations\":[]}, \"axis2\": {\"level\":\"\",\"confidence\":0,\"citations\":[]}, \"axis3\": {\"level\":\"\",\"confidence\":0,\"citations\":[]} } }"
+            },
+            {
+              "content": "={{ 'Score the three MDM axes for this ED encounter.\\n\\nSOAP NOTE:\\n' + ($json.soapHtml || '') + '\\n\\nTRANSCRIPT:\\n' + ($json.transcript || '') }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "cn-score-em-02",
+      "name": "CN: Score E/M",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        800,
+        1056
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ─── VIRTUAL DOCTOR — Parse AI reply & return ──────────────────────────────\nconst aiInput = $input.first().json;\nlet reply = 'I\\'m sorry, I didn\\'t get that. Could you repeat your symptoms?';\nlet done  = false;\n\nfunction extractRawText(inp) {\n  if (Array.isArray(inp.output)) {\n    for (const msg of inp.output) {\n      if (Array.isArray(msg.content)) {\n        for (const block of msg.content) { if (block.text) return block.text; }\n      }\n      if (typeof msg.text === 'string') return msg.text;\n    }\n  }\n  if (inp.message?.content)                                  return inp.message.content;\n  if (Array.isArray(inp.choices) && inp.choices[0]?.message?.content)\n                                                             return inp.choices[0].message.content;\n  if (typeof inp.text    === 'string') return inp.text;\n  if (typeof inp.content === 'string') return inp.content;\n  if (typeof inp.output  === 'string') return inp.output;\n  return JSON.stringify(inp);\n}\n\ntry {\n  const raw = extractRawText(aiInput);\n  const clean = raw.replace(/```json|```/g, '').trim();\n  try {\n    const parsed = JSON.parse(clean);\n    reply = parsed.reply || reply;\n    done  = parsed.done === true;\n  } catch {\n    reply = clean.replace('[CONSULTATION_COMPLETE]', '').trim();\n    done  = clean.includes('[CONSULTATION_COMPLETE]');\n  }\n} catch(e) {\n  reply = 'Sorry, something went wrong. Please try again.';\n}\n\nreturn [{ json: { reply, done } }];\n"
+      },
+      "id": "815c84bd-2475-43af-8d17-8b522ec006e9",
+      "name": "VD: Parse & Respond",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        7552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── CLINICAL NOTES + E/M CODING — Format & return HTML + structured em ──────\nconst aiInput = $input.first().json;\nconst VAL = $input.first().json.validation || null; // CN: Score E/M output\nconst soapHtml = ($('CN: Extract SOAP').first().json.soapHtml) || '';\nconst THRESHOLD = 0.75;\n\nfunction extractRawText(inp){\n  if(Array.isArray(inp.output)){for(const m of inp.output){if(Array.isArray(m.content)){for(const b of m.content){if(b.text)return b.text;}}if(typeof m.text==='string')return m.text;}}\n  if(inp.message&&inp.message.content) return inp.message.content;\n  if(Array.isArray(inp.choices)&&inp.choices[0]&&inp.choices[0].message&&inp.choices[0].message.content) return inp.choices[0].message.content;\n  if(typeof inp.text==='string')return inp.text;\n  if(typeof inp.content==='string')return inp.content;\n  if(typeof inp.output==='string')return inp.output;\n  return JSON.stringify(inp);\n}\n\nconst esc=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\nconst soapBlock = soapHtml || '<p style=\"color:#991b1b\">SOAP note unavailable.</p>';\n\nlet axes=null;\ntry{ const raw=extractRawText(aiInput).replace(/```json|```/g,'').trim(); const s=raw.indexOf('{'),e=raw.lastIndexOf('}'); axes=JSON.parse(s!==-1&&e>s?raw.substring(s,e+1):raw).axes; }catch(err){ axes=null; }\n\n// Shared code maps (ED E/M, MDM-only). Exposed to the dashboard for the confirm gate.\nconst CODE={1:'99282',2:'99283',3:'99284',4:'99285'};\nconst LABEL={1:'straightforward',2:'low',3:'moderate',4:'high'};\nconst CODE_OPTIONS=[\n  {code:'99281',level:'n/a',desc:'ED visit, may not require physician presence'},\n  {code:'99282',level:'straightforward',desc:'Straightforward MDM'},\n  {code:'99283',level:'low',desc:'Low MDM'},\n  {code:'99284',level:'moderate',desc:'Moderate MDM'},\n  {code:'99285',level:'high',desc:'High MDM'}\n];\n\nlet em=null;          // structured payload for the dashboard MDM confirm gate\nlet emSection='';\nif(axes){\n  const keys=['axis1','axis2','axis3'];\n  const labels={axis1:'Problems addressed',axis2:'Data reviewed',axis3:'Risk of management'};\n  const RANK={straightforward:1,low:2,moderate:3,high:4};\n  const color={straightforward:'#16a34a',low:'#0891b2',moderate:'#ca8a04',high:'#dc2626'};\n  const two=(r)=>{const x=[...r].sort((a,b)=>b-a);return x[1];};\n  const ranks=keys.map(k=>RANK[((axes[k]&&axes[k].level)||'').toLowerCase()]||1);\n  const docRank=two(ranks); const docCode=CODE[docRank]; const docLevel=LABEL[docRank];\n  const bumped=keys.map((k,i)=>{const conf=Number(axes[k]&&axes[k].confidence)||0; return conf<THRESHOLD?Math.min(4,ranks[i]+1):ranks[i];});\n  const bestRank=two(bumped); const bestCode=CODE[bestRank]; const bestLevel=LABEL[bestRank];\n  const uncertain=keys.filter(k=>(Number(axes[k]&&axes[k].confidence)||0)<THRESHOLD);\n  const c=color[docLevel]||'#4f46e5';\n\n  // ── structured payload (drives the editable dashboard gate) ──\n  em={\n    suggestedCode: docCode,\n    suggestedLevel: docLevel,\n    supportableCode: bestCode,\n    supportableLevel: bestLevel,\n    threshold: THRESHOLD,\n    codeOptions: CODE_OPTIONS,\n    axes: keys.map(k=>{const a=axes[k]||{};return {\n      key:k,\n      label:labels[k],\n      level:((a.level)||'').toLowerCase()||'straightforward',\n      confidence:Number(a.confidence)||0,\n      citations:Array.isArray(a.citations)?a.citations:[]\n    };})\n  };\n\n  const rows=keys.map(k=>{const a=axes[k]||{};const lc=color[((a.level)||'').toLowerCase()]||'#6b7280';\n    const cites=(Array.isArray(a.citations)?a.citations:[]).map(q=>`<div style=\"font-size:11px;color:#6b7280;border-left:2px solid ${lc};padding:1px 0 1px 8px;margin:3px 0;font-style:italic\">&ldquo;${esc(q)}&rdquo;</div>`).join('')||'<div style=\"font-size:11px;color:#9ca3af\">No direct citation found</div>';\n    const conf=Math.round((Number(a.confidence)||0)*100);\n    return `<tr style=\"border-bottom:1px solid #f0f0f0\">\n      <td style=\"padding:8px 10px;font-weight:500;vertical-align:top\">${labels[k]}</td>\n      <td style=\"padding:8px 10px;vertical-align:top\"><span style=\"background:${lc}20;color:${lc};border:1px solid ${lc}40;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:700;text-transform:uppercase\">${esc(a.level||'?')}</span><div style=\"font-size:11px;color:#6b7280;margin-top:3px\">${conf}% conf</div></td>\n      <td style=\"padding:8px 10px;vertical-align:top\">${cites}</td>\n    </tr>`;}).join('');\n\n  const rangeNote = (bestCode!==docCode)\n    ? `<div style=\"background:#fffbeb;border:1px solid #fde047;border-radius:6px;padding:8px 12px;margin:10px 0;font-size:12px;color:#854d0e\">Documented now: <strong>${docCode}</strong> (${docLevel}). Up to <strong>${bestCode}</strong> (${bestLevel}) is supportable if confirmed in the note: ${uncertain.map(k=>labels[k]).join(', ')}.</div>`\n    : `<div style=\"font-size:12px;color:#16a34a;margin:8px 0\">All three axes scored with confidence; suggested code is firm.</div>`;\n\n  emSection=`\n  <div style=\"margin-top:18px;border-top:2px dashed #e5e7eb;padding-top:14px\">\n    <div style=\"font-size:14px;font-weight:800;color:#1e293b;margin-bottom:10px\">Suggested E/M Code</div>\n    <div style=\"background:${c}12;border:2px solid ${c};border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:16px;margin-bottom:10px\">\n      <div style=\"font-size:30px;font-weight:800;color:${c}\">${docCode}</div>\n      <div><div style=\"font-size:15px;font-weight:700;color:${c}\">${docLevel.charAt(0).toUpperCase()+docLevel.slice(1)} MDM</div>\n      <div style=\"font-size:12px;color:#6b7280\">ED E/M selected by Medical Decision Making, highest 2 of 3 elements</div></div>\n    </div>\n    ${rangeNote}\n    <div style=\"border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-top:8px\">\n      <table style=\"width:100%;border-collapse:collapse\">\n        <thead><tr style=\"background:#f9fafb\">\n          <th style=\"padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">MDM ELEMENT</th>\n          <th style=\"padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">LEVEL</th>\n          <th style=\"padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">CITATION (from this note)</th>\n        </tr></thead><tbody>${rows}</tbody>\n      </table>\n    </div>\n    <div style=\"font-size:11px;color:#9ca3af;margin-top:10px;line-height:1.5\">\n      Code-rule source: AMA CPT 2023 Evaluation and Management (E/M) Guidelines, Emergency Department Services 99281-99285 (MDM-only; time-based coding not permitted in the ED); ACEP 2023 ED E/M Guidelines FAQ. Final MDM level to code: straightforward 99282, low 99283, moderate 99284, high 99285; 99281 does not require physician presence. Advisory only - confirm before claim submission.\n    </div>\n  </div>`;\n} else {\n  emSection=`<div style=\"margin-top:16px;font-size:12px;color:#9ca3af\">E/M code suggestion unavailable (could not score MDM from this note).</div>`;\n}\n\nlet valBanner='';\nif(VAL){\n  const fColor = VAL.faithful===true?'#16a34a':(VAL.faithful===false?'#dc2626':'#ca8a04');\n  const fBg = VAL.faithful===true?'#f0fdf4':(VAL.faithful===false?'#fef2f2':'#fefce8');\n  const fPct = (VAL.faithScore!=null)?(Math.round(VAL.faithScore*100)+'% of note claims grounded in transcript'):'note faithfulness not scored';\n  const unsup = (VAL.unsupported&&VAL.unsupported.length)?`<div style=\\\"margin-top:4px;font-size:11px;color:${fColor}\\\">Unsupported: ${VAL.unsupported.slice(0,3).map(esc).join('; ')}</div>`:'';\n  const citLine = `${VAL.citationsVerified}/${VAL.citationsTotal} MDM citations verified`+(VAL.citationsDropped>0?` &mdash; ${VAL.citationsDropped} dropped`:'');\n  const agLine = (VAL.scorerComparable>0)?`${VAL.scorerAgreed}/${VAL.scorerComparable} axes agree across two scorers`:'single scorer';\n  const flagLine = (VAL.axesAdjusted&&VAL.axesAdjusted.length)?` &mdash; ${VAL.axesAdjusted.length} axis/axes flagged for confirmation`:'';\n  valBanner = `<div style=\\\"background:${fBg};border:1px solid ${fColor}55;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:${fColor}\\\"><strong>Automated validation</strong><br>Note faithfulness: ${fPct}.<br>Citation grounding: ${citLine}.<br>Cross-scorer: ${agLine}${flagLine}.${unsup}</div>`;\n}\nconst styledHtml = `<div style=\"font-family:system-ui,sans-serif;line-height:1.7;font-size:13px\">\n  <div style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#1e40af;font-size:12px\">\n    📋 AI-generated SOAP note and E/M code suggestion — review before saving to chart\n  </div>\n  ${valBanner}\n  <div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px\">\n    ${soapBlock}\n    ${emSection}\n  </div>\n</div>`;\nreturn [{ json: { html: styledHtml, em, validation: VAL } }];\n"
+      },
+      "id": "53ba7ec2-afee-4aab-ab91-d1f3cf7f7f7a",
+      "name": "CN: Format SOAP HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        8448
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ 'You are a compassionate, efficient AI clinical assistant acting as a virtual doctor conducting a patient intake interview.\\n\\nYour goals:\\n1. Greet the patient warmly and ask about their chief complaint.\\n2. Follow up with targeted clinical questions: onset, duration, severity (0-10), character, radiation, aggravating/relieving factors, associated symptoms.\\n3. Ask about relevant history: allergies and current medications.\\n4. Ask the patient if they have any recent vital signs handy (for example blood pressure, heart rate, temperature, weight, or oxygen saturation), and if they do, record the exact values they share. If they do not have them on hand, reassure them that is perfectly fine and continue.\\n5. After 6-8 exchanges (when you have enough information), summarize what you have gathered and say you will now update the chart — signal completion by ending your reply with the exact token: [CONSULTATION_COMPLETE]\\n\\nRules:\\n- Ask ONE focused question at a time.\\n- Keep replies concise (2-3 sentences max).\\n- Be warm and professional.\\n- Never make diagnoses — only gather information.\\n- Use today\\'s date for any time references: ' + $json.today + '\\n\\nRespond with ONLY a JSON object, no markdown:\\n{ \"reply\": \"your spoken reply here\", \"done\": false }\\nOR when complete:\\n{ \"reply\": \"Thank you. I have all the information I need. Let me update your chart now.\", \"done\": true }' }}",
+              "role": "system"
+            },
+            {
+              "content": "={{ 'Patient: ' + $json.patientName + '\\nToday: ' + $json.today + '\\nAI turns so far: ' + $json.aiTurns + '\\n\\nFull conversation so far:\\n' + $json.transcript + '\\n\\nLatest patient input: \"' + $json.patientInput + '\"\\n\\n' + ($json.isStart ? 'This is the START of the consultation — greet the patient and ask their chief complaint.' : 'Continue the consultation with your next focused clinical question based on what the patient just said.') + ($json.aiTurns >= 8 ? '\\nYou have asked enough questions. Wrap up the consultation now (done: true).' : '') }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 300,
+          "temperature": 0.4
+        }
+      },
+      "id": "2f1baf9f-f792-4866-bc26-252a78b33d19",
+      "name": "VD: AI Doctor Reply",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        2000,
+        7552
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a clinical documentation auditor. Compare the SOAP note against the consultation transcript and judge faithfulness only. A claim is unsupported if it states a clinical fact (symptom, finding, vital, diagnosis, medication, plan) not present in or following from the transcript. Do not penalize headers, formatting, or reasonable phrasing of something present. Return ONLY valid JSON, no markdown:\n{ \"faithful\": true, \"score\": 0.0, \"unsupported\": [\"\"], \"notes\": \"\" }\nscore = fraction (0..1) of note clinical claims supported by the transcript."
+            },
+            {
+              "content": "={{ 'Judge faithfulness of this SOAP note against the transcript.\\n\\nSOAP NOTE:\\n' + ($json.soapHtml || '') + '\\n\\nTRANSCRIPT:\\n' + ($json.transcript || '') }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "cn-judge-01",
+      "name": "CN: Judge Faithfulness",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1000,
+        1480
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "ew0Zr9x1Cp7wFZs7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "rd-resp-01",
+      "name": "RD: Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        10720
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "extract-chart-updates",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b37cbd63-1e05-4161-9606-2ebdaf12ee18",
+      "name": "POST /extract-chart-updates",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        9104
+      ],
+      "webhookId": "extract-chart-updates"
+    }
+  ],
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /generate-clinical-notes": {
+      "main": [
+        [
+          {
+            "node": "CN: Prepare Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Prepare Transcript": {
+      "main": [
+        [
+          {
+            "node": "CN: AI Generate SOAP Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: AI Generate SOAP Note": {
+      "main": [
+        [
+          {
+            "node": "CN: Extract SOAP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Format SOAP HTML": {
+      "main": [
+        [
+          {
+            "node": "CN: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /extract-chart-updates": {
+      "main": [
+        [
+          {
+            "node": "CU: Prepare Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CU: Prepare Transcript": {
+      "main": [
+        [
+          {
+            "node": "CU: AI Extract Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CU: AI Extract Updates": {
+      "main": [
+        [
+          {
+            "node": "CU: Build FHIR + HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CU: Build FHIR + HTML": {
+      "main": [
+        [
+          {
+            "node": "CU: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /virtual-doctor-turn": {
+      "main": [
+        [
+          {
+            "node": "VD: Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VD: Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "VD: AI Doctor Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VD: AI Doctor Reply": {
+      "main": [
+        [
+          {
+            "node": "VD: Parse & Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VD: Parse & Respond": {
+      "main": [
+        [
+          {
+            "node": "VD: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Extract SOAP": {
+      "main": [
+        [
+          {
+            "node": "CN: Judge Faithfulness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Score E/M": {
+      "main": [
+        [
+          {
+            "node": "CN: Score E/M B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /review-icd-mdm": {
+      "main": [
+        [
+          {
+            "node": "RC: Prepare Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Prepare Transcript": {
+      "main": [
+        [
+          {
+            "node": "RC: AI Extract Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: AI Extract Codes": {
+      "main": [
+        [
+          {
+            "node": "RC: Build Review Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Build Review Response": {
+      "main": [
+        [
+          {
+            "node": "RC: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Judge Faithfulness": {
+      "main": [
+        [
+          {
+            "node": "CN: Parse Faithfulness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Parse Faithfulness": {
+      "main": [
+        [
+          {
+            "node": "CN: Score E/M",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Score E/M B": {
+      "main": [
+        [
+          {
+            "node": "CN: Verify + Reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CN: Verify + Reconcile": {
+      "main": [
+        [
+          {
+            "node": "CN: Format SOAP HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /record-coding-decision": {
+      "main": [
+        [
+          {
+            "node": "RD: Log Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RD: Log Decision": {
+      "main": [
+        [
+          {
+            "node": "RD: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /score-eval": {
+      "main": [
+        [
+          {
+            "node": "EV: Compute Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EV: Compute Metrics": {
+      "main": [
+        [
+          {
+            "node": "EV: Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,173 @@
+{
+  "name": "EPIC — Care Gaps",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "care-gaps-run",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ebc83acb-a3bf-4f41-a0e1-11e32765e29e",
+      "name": "POST /care-gaps-run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        9648
+      ],
+      "webhookId": "care-gaps-run"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Immunization?patient=' + ($json.patientId || $json.body?.patientId || '') + '&_count=100&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "8b242da6-58b4-4a1a-b7be-f6a273ea4d54",
+      "name": "Fetch Immunizations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        9552
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($input.first().json.patientId || '') + '&category=laboratory&_count=50&_sort=-date&_format=json' }}",
+        "options": {}
+      },
+      "id": "12848942-f2d1-41bb-b01f-fbd60cc5ef39",
+      "name": "Fetch Labs for Care Gaps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        9744
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── CARE GAPS — ENRICHED HTML OUTPUT ────────────────────────\n// Reads immunization bundle from node 0, lab bundle from node 1\n// Emits { html } with detailed gap analysis table + recommendations.\n\nconst allInputs = $input.all();\nconst immInput  = allInputs[0]?.json || {};\nconst labInput  = allInputs[1]?.json || {};\n\n// Parse bundles\nconst parseBundle = (raw) => {\n  try { return (typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data || raw); }\n  catch { return {}; }\n};\n\nconst immBundle = parseBundle(immInput);\nconst labBundle = parseBundle(labInput);\n\nconst imms = immBundle.entry?.map(e => e.resource) ?? [];\nconst labs = labBundle.entry?.map(e => e.resource) ?? [];\n\nconst fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : null;\n\n// ── Immunization helpers ──────────────────────────────────────\nconst immTexts = imms.flatMap(i => [\n  i.vaccineCode?.text || '',\n  ...(i.vaccineCode?.coding?.map(c => c.display || c.code || '') || [])\n]).map(s => s.toLowerCase().trim()).filter(Boolean);\n\nconst findImm = (keywords) => {\n  for (const imm of imms) {\n    const texts = [\n      imm.vaccineCode?.text || '',\n      ...(imm.vaccineCode?.coding?.map(c => c.display || '') || [])\n    ].map(s => s.toLowerCase());\n    if (texts.some(t => keywords.some(k => t.includes(k)))) {\n      return fmtDate(imm.occurrenceDateTime || imm.recorded);\n    }\n  }\n  return null;\n};\n\n// ── Lab helpers ───────────────────────────────────────────────\nconst findLab = (keywords) => {\n  for (const ob of labs) {\n    const name = (ob.code?.text || ob.code?.coding?.[0]?.display || '').toLowerCase();\n    if (keywords.some(k => name.includes(k))) {\n      const val  = ob.valueQuantity ? `${ob.valueQuantity.value?.toFixed(1)} ${ob.valueQuantity.unit || ''}`.trim() : ob.valueString || '—';\n      const date = fmtDate(ob.effectiveDateTime || ob.issued);\n      return { val, date };\n    }\n  }\n  return null;\n};\n\n// ── Screening catalogue ───────────────────────────────────────\nconst screenings = [\n  {\n    category: 'Immunizations',\n    items: [\n      { name:'Influenza (annual)',      keywords:['influenza','flu'],         type:'imm', frequency:'Annually',    priority:'routine' },\n      { name:'Pneumococcal (PCV)',      keywords:['pneumococcal','pcv','pneumo'], type:'imm', frequency:'Age-based', priority:'routine' },\n      { name:'Tdap / DTaP',            keywords:['tdap','dtap'],             type:'imm', frequency:'Every 10 yrs', priority:'routine' },\n      { name:'COVID-19',               keywords:['covid'],                   type:'imm', frequency:'Per guidelines', priority:'routine' },\n      { name:'Hepatitis B',            keywords:['hepatitis b','hep b'],     type:'imm', frequency:'3-dose series', priority:'routine' },\n      { name:'Hepatitis A',            keywords:['hepatitis a','hep a'],     type:'imm', frequency:'2-dose series', priority:'routine' },\n      { name:'Zoster (Shingrix)',       keywords:['zoster','shingrix','varicella zoster'], type:'imm', frequency:'2-dose (age 50+)', priority:'routine' },\n      { name:'MMR',                    keywords:['mmr','measles','mumps'],   type:'imm', frequency:'2 doses',       priority:'routine' },\n    ]\n  },\n  {\n    category: 'Lab Screenings',\n    items: [\n      { name:'Hemoglobin A1c',         keywords:['hemoglobin a1c','hba1c','a1c'], type:'lab', frequency:'Annually (diabetics)', priority:'important' },\n      { name:'Lipid Panel',            keywords:['lipid','cholesterol','ldl','hdl'], type:'lab', frequency:'Every 5 yrs',   priority:'important' },\n      { name:'Complete Blood Count',   keywords:['cbc','complete blood count','hemoglobin'], type:'lab', frequency:'Annual',    priority:'routine' },\n      { name:'Comprehensive Metabolic',keywords:['comprehensive metabolic','cmp','basic metabolic','bmp'], type:'lab', frequency:'Annual', priority:'routine' },\n      { name:'TSH (Thyroid)',          keywords:['tsh','thyroid stimulating'], type:'lab', frequency:'Every 5 yrs',   priority:'routine' },\n    ]\n  }\n];\n\n// ── Build rows ────────────────────────────────────────────────\nconst priorityIcon = { important: '🔶', routine: '🔷' };\n\nlet totalItems = 0; let gapCount = 0;\nlet sectionHTMLs = [];\n\nfor (const section of screenings) {\n  const rows = [];\n  for (const item of section.items) {\n    totalItems++;\n    let lastDate = null; let lastValue = '—'; let status;\n\n    if (item.type === 'imm') {\n      lastDate = findImm(item.keywords);\n      lastValue = lastDate ? '✓ Immunized' : '—';\n    } else {\n      const found = findLab(item.keywords);\n      if (found) { lastDate = found.date; lastValue = found.val; }\n    }\n\n    if (lastDate) {\n      status = { color: '#16a34a', bg: '#f0fdf4', badge: '✓ On Record', action: 'No action needed' };\n    } else {\n      gapCount++;\n      const p = item.priority;\n      status = p === 'important'\n        ? { color: '#ea580c', bg: '#fff7ed', badge: '⚠ Gap — Important', action: 'Schedule soon' }\n        : { color: '#ca8a04', bg: '#fefce8', badge: '○ Not on Record',   action: 'Review eligibility' };\n    }\n\n    rows.push(`\n    <tr style=\"border-bottom:1px solid #f0f0f0\">\n      <td style=\"padding:8px 10px\">\n        <span style=\"font-size:13px\">${priorityIcon[item.priority] || ''}</span>\n        <span style=\"font-weight:500;margin-left:4px\">${item.name}</span>\n      </td>\n      <td style=\"padding:8px 10px;color:#6b7280;font-size:12px\">${item.frequency}</td>\n      <td style=\"padding:8px 10px;color:#374151;font-size:13px;font-family:monospace\">${lastValue}</td>\n      <td style=\"padding:8px 10px;color:#6b7280;font-size:12px\">${lastDate || '—'}</td>\n      <td style=\"padding:8px 10px\">\n        <span style=\"background:${status.bg};color:${status.color};border:1px solid ${status.color}40;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap\">\n          ${status.badge}\n        </span>\n      </td>\n      <td style=\"padding:8px 10px;color:#374151;font-size:12px\">${status.action}</td>\n    </tr>`);\n  }\n\n  sectionHTMLs.push(`\n    <div style=\"margin-bottom:20px\">\n      <div style=\"font-size:13px;font-weight:700;color:#374151;padding:8px 10px;background:#f9fafb;border-radius:6px 6px 0 0;border:1px solid #e5e7eb;border-bottom:none\">\n        ${section.category}\n      </div>\n      <div style=\"border:1px solid #e5e7eb;border-radius:0 0 8px 8px;overflow:hidden\">\n        <table style=\"width:100%;border-collapse:collapse\">\n          <thead>\n            <tr style=\"background:#f9fafb;border-bottom:1px solid #e5e7eb\">\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">SCREENING</th>\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">FREQUENCY</th>\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">LAST VALUE</th>\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">LAST DATE</th>\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">STATUS</th>\n              <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280;font-weight:600\">ACTION</th>\n            </tr>\n          </thead>\n          <tbody>${rows.join('')}</tbody>\n        </table>\n      </div>\n    </div>`);\n}\n\n// ── Summary bar ──────────────────────────────────────���────────\nconst pct = Math.round(((totalItems - gapCount) / totalItems) * 100);\nconst summaryColor = gapCount === 0 ? '#16a34a' : gapCount <= 3 ? '#ca8a04' : '#dc2626';\n\nconst html = `\n<div style=\"font-family:system-ui,sans-serif\">\n  <!-- Summary -->\n  <div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between\">\n    <div>\n      <div style=\"font-size:16px;font-weight:700;color:#1e293b\">Preventive Care Summary</div>\n      <div style=\"font-size:12px;color:#64748b;margin-top:2px\">${totalItems - gapCount} of ${totalItems} screenings on record · ${gapCount} potential gap(s)</div>\n    </div>\n    <div style=\"text-align:center\">\n      <div style=\"font-size:28px;font-weight:800;color:${summaryColor}\">${pct}%</div>\n      <div style=\"font-size:11px;color:#94a3b8\">Up to date</div>\n    </div>\n  </div>\n  ${sectionHTMLs.join('')}\n  <div style=\"font-size:11px;color:#9ca3af;margin-top:6px\">🔶 Important gap &nbsp;·&nbsp; 🔷 Routine gap &nbsp;·&nbsp; Based on immunization and lab records in FHIR</div>\n</div>`;\n\nreturn [{ json: { html } }];"
+      },
+      "id": "6fbc8ddd-43eb-48c3-993d-fccd3721e411",
+      "name": "Evaluate Care Gaps",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        9552
+      ]
+    },
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d24304c3-fbda-4acc-bcb5-6a1d5768fdaa",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        7776
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "2debe390-989e-482d-b529-4ecf1136e823",
+      "name": "Return Care Gaps Table",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        9552
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\"panels\": [{\"id\": \"care-gaps\", \"label\": \"Care Gaps\", \"title\": \"Care Gap Analysis\", \"description\": \"Preventive care items the patient may be overdue for\", \"webhook\": \"care-gaps-run\", \"trigger\": \"button\", \"buttonLabel\": \"Check Care Gaps\"}]}) }}",
+        "options": {}
+      },
+      "id": "8e9f43d6-8061-48b2-ac5a-82c9ae9c5209",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        7776
+      ]
+    }
+  ],
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /care-gaps-run": {
+      "main": [
+        [
+          {
+            "node": "Fetch Immunizations",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Labs for Care Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Immunizations": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Care Gaps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Care Gaps": {
+      "main": [
+        [
+          {
+            "node": "Return Care Gaps Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

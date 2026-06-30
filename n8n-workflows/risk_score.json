@@ -1,0 +1,157 @@
+{
+  "name": "EPIC — Risk Score",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ─── RISK SCORE — LATEST READINGS ONLY ───────────────────────\nconst input = $input.first().json || {};\n\n// Parse FHIR bundle from all possible wrapper shapes\nlet bundle = {};\ntry {\n  const raw = input.data ?? input.body ?? input;\n  bundle = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  if (!bundle.entry && !bundle.resourceType) {\n    const inner = bundle.data ?? bundle.body ?? null;\n    if (inner) bundle = typeof inner === 'string' ? JSON.parse(inner) : inner;\n  }\n} catch (err) {\n  return [{ json: { html: `<div style='padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;color:#991b1b'><strong>Could not parse vitals:</strong> ${err.message}</div>` } }];\n}\n\nconst entries = bundle.entry?.map(e => e.resource) ?? [];\n\nif (!entries.length) {\n  return [{ json: { html: `<div style='padding:16px;background:#fefce8;border:1px solid #fde047;border-radius:8px;color:#854d0e'><strong>Risk score unavailable</strong><br>No vital signs found for this patient.</div>` } }];\n}\n\n// Deduplicate: keep only the latest per vital type\nconst latestByType = new Map();\nfor (const obs of entries) {\n  const typeKey = obs.code?.text || obs.code?.coding?.[0]?.display || obs.code?.coding?.[0]?.code || 'unknown';\n  const obsDate = new Date(obs.effectiveDateTime || obs.issued || 0);\n  const existing = latestByType.get(typeKey);\n  if (!existing || obsDate > new Date(existing.effectiveDateTime || existing.issued || 0)) {\n    latestByType.set(typeKey, obs);\n  }\n}\n\nconst latest = Array.from(latestByType.values());\n\nlet score = 0;\nconst rows = [];\nconst fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : '—';\n\nfor (const obs of latest) {\n  const name   = (obs.code?.text || obs.code?.coding?.[0]?.display || 'Unknown vital').trim();\n  const date   = fmtDate(obs.effectiveDateTime || obs.issued);\n  const val    = obs.valueQuantity?.value;\n  const unit   = obs.valueQuantity?.unit || '';\n  const nameLo = name.toLowerCase();\n\n  if (val !== undefined && val !== null) {\n    let status = 'normal';\n    let note   = 'Within expected range';\n\n    if (nameLo.includes('heart rate') || nameLo.includes('pulse')) {\n      if (val > 100)       { score += 2; status = 'high';       note = `Tachycardia (>100 bpm)`; }\n      else if (val < 60)   { score += 1; status = 'low';        note = `Bradycardia (<60 bpm)`; }\n    } else if (nameLo.includes('respiratory') || nameLo.includes('breath')) {\n      if (val > 20)        { score += 2; status = 'high';       note = `Elevated respiratory rate (>20/min)`; }\n      else if (val < 12)   { score += 1; status = 'low';        note = `Low respiratory rate (<12/min)`; }\n    } else if (nameLo.includes('temperature') || nameLo.includes('body temp')) {\n      if (val > 38.3)      { score += 2; status = 'high';       note = `Fever (${val.toFixed(1)}°C)`; }\n      else if (val < 36.0) { score += 1; status = 'low';        note = `Hypothermia (${val.toFixed(1)}°C)`; }\n    } else if (nameLo.includes('oxygen') || nameLo.includes('spo2') || nameLo.includes('saturation')) {\n      if (val < 94)        { score += 3; status = 'critical';   note = `Low O₂ saturation (<94%)`; }\n      else if (val < 96)   { score += 1; status = 'borderline'; note = `Borderline O₂ saturation`; }\n    } else if (nameLo.includes('pain')) {\n      if (val >= 7)        { score += 2; status = 'high';       note = `Severe pain (${val}/10)`; }\n      else if (val >= 4)   { score += 1; status = 'borderline'; note = `Moderate pain (${val}/10)`; }\n    } else if (nameLo.includes('bmi') || nameLo.includes('body mass index')) {\n      if (val >= 35)       { score += 1; status = 'borderline'; note = `Obese class II+ (BMI ${val.toFixed(1)})`; }\n      else if (val < 18.5) { score += 1; status = 'low';        note = `Underweight (BMI ${val.toFixed(1)})`; }\n    } else if (nameLo.includes('glucose') || nameLo.includes('blood glucose')) {\n      if (val > 200)       { score += 2; status = 'high';       note = `High glucose (${val.toFixed(0)} mg/dL)`; }\n      else if (val < 70)   { score += 2; status = 'low';        note = `Low glucose (${val.toFixed(0)} mg/dL)`; }\n    }\n\n    rows.push({ vital: name, value: `${val.toFixed(1)} ${unit}`.trim(), date, status, note });\n  }\n\n  if (Array.isArray(obs.component)) {\n    let sys = null; let dia = null;\n    for (const comp of obs.component) {\n      const cn = (comp.code?.text || comp.code?.coding?.[0]?.display || '').toLowerCase();\n      const cv = comp.valueQuantity?.value;\n      if (cv == null) continue;\n      if (cn.includes('systolic'))  sys = cv;\n      if (cn.includes('diastolic')) dia = cv;\n    }\n    if (sys !== null || dia !== null) {\n      let status = 'normal'; let note = 'BP within normal range'; let bpScore = 0;\n      const bpStr = `${sys !== null ? sys.toFixed(0) : '?'}/${dia !== null ? dia.toFixed(0) : '?'} mmHg`;\n      if (sys !== null) {\n        if (sys >= 180)      { bpScore += 3; status = 'critical';   note = `Hypertensive crisis (systolic ${sys} mmHg)`; }\n        else if (sys >= 140) { bpScore += 2; status = 'high';       note = `Stage 2 hypertension (systolic ${sys} mmHg)`; }\n        else if (sys >= 130) { bpScore += 1; status = 'borderline'; note = `Stage 1 hypertension (systolic ${sys} mmHg)`; }\n        else if (sys < 90)   { bpScore += 2; status = 'low';        note = `Hypotension (systolic ${sys} mmHg)`; }\n      }\n      if (dia !== null && bpScore === 0) {\n        if (dia >= 90)       { bpScore += 1; status = 'high';       note = `Elevated diastolic (${dia} mmHg)`; }\n        else if (dia < 60)   { bpScore += 1; status = 'low';        note = `Low diastolic (${dia} mmHg)`; }\n      }\n      score += bpScore;\n      rows.push({ vital: 'Blood Pressure', value: bpStr, date, status, note });\n    }\n  }\n}\n\nconst riskLevel  = score >= 6 ? 'critical' : score >= 4 ? 'high' : score >= 2 ? 'moderate' : 'low';\nconst riskLabels = { critical: '🔴 Critical', high: '🟠 High', moderate: '🟡 Moderate', low: '🟢 Low' };\nconst riskColors = { critical: '#dc2626', high: '#ea580c', moderate: '#ca8a04', low: '#16a34a' };\nconst riskBg     = { critical: '#fef2f2', high: '#fff7ed', moderate: '#fefce8', low: '#f0fdf4' };\n\nconst statusBadge = (s) => {\n  const map = { critical:'#dc2626', high:'#ea580c', borderline:'#ca8a04', normal:'#16a34a', low:'#2563eb' };\n  const color = map[s] || '#6b7280';\n  return `<span style=\"background:${color}20;color:${color};border:1px solid ${color}40;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;text-transform:uppercase\">${s}</span>`;\n};\n\nconst tableRows = rows.map(r => `\n  <tr style=\"border-bottom:1px solid #f0f0f0\">\n    <td style=\"padding:7px 10px;font-weight:500\">${r.vital}</td>\n    <td style=\"padding:7px 10px;font-family:monospace;font-size:13px\">${r.value}</td>\n    <td style=\"padding:7px 10px;color:#6b7280;font-size:12px\">${r.date}</td>\n    <td style=\"padding:7px 10px\">${statusBadge(r.status)}</td>\n    <td style=\"padding:7px 10px;color:#374151;font-size:12px\">${r.note}</td>\n  </tr>`).join('');\n\nconst html = `\n<div style=\"font-family:system-ui,sans-serif\">\n  <div style=\"background:${riskBg[riskLevel]};border:2px solid ${riskColors[riskLevel]};border-radius:10px;padding:16px 20px;margin-bottom:18px;display:flex;align-items:center;gap:18px\">\n    <div style=\"font-size:36px;font-weight:800;color:${riskColors[riskLevel]}\">${score}</div>\n    <div>\n      <div style=\"font-size:18px;font-weight:700;color:${riskColors[riskLevel]}\">${riskLabels[riskLevel]} Risk</div>\n      <div style=\"font-size:12px;color:#6b7280;margin-top:2px\">Composite score from latest vitals only · ${rows.length} vital type(s) assessed</div>\n    </div>\n  </div>\n  <div style=\"border:1px solid #e5e7eb;border-radius:8px;overflow:hidden\">\n    <table style=\"width:100%;border-collapse:collapse\">\n      <thead>\n        <tr style=\"background:#f9fafb\">\n          <th style=\"padding:9px 10px;text-align:left;font-size:12px;color:#6b7280;font-weight:600\">VITAL SIGN</th>\n          <th style=\"padding:9px 10px;text-align:left;font-size:12px;color:#6b7280;font-weight:600\">LATEST VALUE</th>\n          <th style=\"padding:9px 10px;text-align:left;font-size:12px;color:#6b7280;font-weight:600\">DATE</th>\n          <th style=\"padding:9px 10px;text-align:left;font-size:12px;color:#6b7280;font-weight:600\">STATUS</th>\n          <th style=\"padding:9px 10px;text-align:left;font-size:12px;color:#6b7280;font-weight:600\">CLINICAL NOTE</th>\n        </tr>\n      </thead>\n      <tbody>${tableRows || '<tr><td colspan=\"5\" style=\"padding:14px;color:#9ca3af;text-align:center\">No scoreable vitals found</td></tr>'}</tbody>\n    </table>\n  </div>\n  <div style=\"font-size:11px;color:#9ca3af;margin-top:10px;text-align:right\">Score legend: O₂ sat critical=+3 · BP crisis=+3 · HR/RR/Temp abnormal=+2 · BMI/Pain/others=+1</div>\n</div>`;\n\nreturn [{ json: { html } }];"
+      },
+      "id": "0b4afb77-3bbe-4009-8b68-f93e221fdc67",
+      "name": "Compute Risk Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        8224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($json.patientId || $json.body?.patientId || '') + '&category=vital-signs&_count=100&_sort=-date&_format=json' }}",
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "0e7c25ea-e017-42fa-bc81-aec76b5ff158",
+      "name": "Fetch Vitals from FHIR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        8224
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d24304c3-fbda-4acc-bcb5-6a1d5768fdaa",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        7776
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "1e813e47-1f68-466e-8330-ee8b747a90e6",
+      "name": "Return Risk Cards",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        8224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\"panels\": [{\"id\": \"risk-score\", \"label\": \"Risk Score\", \"title\": \"Sepsis Risk Score\", \"description\": \"Vitals-based sepsis screening — latest readings only\", \"webhook\": \"risk-score-run\", \"trigger\": \"auto\"}]}) }}",
+        "options": {}
+      },
+      "id": "8e9f43d6-8061-48b2-ac5a-82c9ae9c5209",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        7776
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "risk-score-run",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "249da8b5-88d6-47cf-9eff-e4599cb4077b",
+      "name": "POST /risk-score-run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        8224
+      ],
+      "webhookId": "risk-score-run"
+    }
+  ],
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /risk-score-run": {
+      "main": [
+        [
+          {
+            "node": "Fetch Vitals from FHIR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Vitals from FHIR": {
+      "main": [
+        [
+          {
+            "node": "Compute Risk Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Risk Score": {
+      "main": [
+        [
+          {
+            "node": "Return Risk Cards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
