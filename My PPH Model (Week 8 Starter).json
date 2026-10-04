@@ -1,0 +1,215 @@
+{
+  "name": "My PPH Model (Week 8 Starter)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "list-panels",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "765ac582-9879-4a31-830b-941d4638e6c5",
+      "name": "GET /list-panels",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        6752,
+        -944
+      ],
+      "webhookId": "list-panels"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\"panels\": [{\"id\": \"my-pph-model\", \"label\": \"My PPH Model\", \"title\": \"My PPH Model (Week 4)\", \"description\": \"Scores the patient with my own Week 4 logistic regression model. Alert above 3%.\", \"webhook\": \"my-pph-model-run\", \"trigger\": \"button\", \"buttonLabel\": \"Run My PPH Model\", \"patientPrefix\": \"pph-\"}]}) }}",
+        "options": {}
+      },
+      "id": "18016b41-b967-4052-88d1-9903385bb745",
+      "name": "Return Panel Registry",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        6976,
+        -944
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "my-pph-model-run",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d99ed039-a9b0-4989-84e2-ae29e64940b2",
+      "name": "POST /my-pph-model-run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        6752,
+        -672
+      ],
+      "webhookId": "my-pph-model-run"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://r4:8080/hapi-fhir-jpaserver/fhir/Observation?patient=' + ($json.body?.patientId || $json.patientId || '') + '&_count=50&_sort=-date&_format=json' }}",
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "fd0d7d58-a713-4350-a46c-80758923e1fa",
+      "name": "PPH: Fetch Observations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        6976,
+        -672
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge FHIR Observation values into the webhook payload (lab values for the model)\n\n// Output of \"PPH: Fetch Observations\" can be a parsed bundle, or a raw JSON string in .data\nconst raw = $input.first().json ?? {};\nlet bundle = raw;\nif (typeof raw.data === 'string') {\n  try { bundle = JSON.parse(raw.data); } catch (e) { bundle = {}; }\n} else if (raw.data && typeof raw.data === 'object') {\n  bundle = raw.data;\n}\n\n// Original webhook payload (patientId, fhirBase) sent by the dashboard\nconst webhook = $('POST /my-pph-model-run').first().json ?? {};\nconst payload = webhook.body ?? webhook;\n\n// LOINC code -> lab name\nconst loincMap = {\n  '20570-8': 'hematocrit',\n  '777-3':   'platelet',\n  '26449-9': 'platelet',\n  '32623-1': 'platelet',\n  '29463-7': 'maternal_weight',\n  '8867-4':  'pulse',\n  '26464-8': 'wbc',\n};\n\n// Keep only the most recent reading of each lab\nconst latest = {};\nfor (const e of (bundle.entry ?? [])) {\n  const obs = e.resource ?? {};\n  const lab = loincMap[obs.code?.coding?.[0]?.code];\n  const val = obs.valueQuantity?.value;\n  if (!lab || val == null) continue;\n  const t = new Date(obs.effectiveDateTime || obs.issued || 0).getTime();\n  if (!latest[lab] || t > latest[lab].t) latest[lab] = { val, t };\n}\n\nconst merged = { ...payload };\nfor (const [lab, { val }] of Object.entries(latest)) merged[lab] = val;\n\nreturn [{ json: merged }];"
+      },
+      "id": "3db7b7a0-6b8d-493e-8010-b7ef34159835",
+      "name": "PPH: Merge Observations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7200,
+        -672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── MY PPH MODEL: RISK SCORER ────────────────────────────────────────────────\nconst errorCard = (title, msg) => `<div style=\"font-family:system-ui,sans-serif;padding:20px\">\n  <div style=\"background:#fef2f2;border:2px solid #dc2626;border-radius:10px;padding:20px\">\n    <div style=\"font-weight:700;font-size:16px;color:#991b1b;margin-bottom:6px\">${title}</div>\n    <div style=\"color:#7f1d1d;font-size:13px;line-height:1.6\">${msg}</div>\n  </div>\n</div>`;\n\ntry {\n  const input     = $input.first().json ?? {};\n  const patientId = input.patientId ?? '';\n  const fhirBase  = (input.fhirBase || 'http://r4:8080/hapi-fhir-jpaserver/fhir').replace('localhost', 'host.docker.internal');\n\n  if (!patientId) {\n    return [{ json: { html: errorCard('No patient selected', 'Select a patient in the dashboard, then click the button again.') } }];\n  }\n\n  // Fetch the patient record to read the risk-factor extensions\n  const patient = await this.helpers.request({ method: 'GET', url: `${fhirBase}/Patient/${patientId}`, json: true });\n  const extMap = {};\n  for (const e of (patient.extension ?? [])) {\n    const key = e.url?.split('/').pop();\n    extMap[key] = e.valueBoolean ?? e.valueString ?? e.valueInteger ?? e.valueDecimal ?? null;\n  }\n\n  if (extMap['pph-data'] !== true) {\n    return [{ json: { html: errorCard('Not a PPH study patient', 'This patient has no PPH study data. Select a patient whose ID starts with <code>pph-</code>.') } }];\n  }\n\n  // ============================================================\n  // STEP 2: YOUR MODEL. This is the only block you (or the AI) change.\n  // Replace `const MODEL = null;` with your model.pkl values, in this format:\n  //\n  // const MODEL = {\n  //   intercept: <number>,\n  //   numeric: {                       // every numeric predictor, in any order\n  //     prior_pph:  { coef: <number>, fill: <median>, source: 'ext:prior-pph' },\n  //     hematocrit: { coef: <number>, fill: <median>, source: 'lab:hematocrit' },\n  //     calcium:    { coef: <number>, fill: <median>, source: null },   // not in the chart\n  //     ...\n  //   },\n  //   categorical: {                   // every one-hot encoded predictor\n  //     delivery_type_label: {\n  //       source: 'ext:delivery-type', fill: '<most frequent value>',\n  //       coef: { '<dropped category>': 0, '<category>': <number>, ... },\n  //     },\n  //     ...\n  //   },\n  //   alertThreshold: 0.03,            // above this = High (alert)\n  // };\n  //\n  // Where each predictor can come from (source):\n  //   'ext:<key>' = patient record extension. Available keys:\n  //       prior-pph, placenta-accreta, general-anesthesia, multiple-gestation,\n  //       placenta-previa, induction-of-labor, augmentation, labor-length,\n  //       hypertensive-disorder, maternal-obesity, cesarean-prior, diabetes,\n  //       chorioamnionitis, polyhydramnios, fetal-macrosomia,\n  //       delivery-type ('Vaginal', 'Cesarean', 'Instrumented vaginal')\n  //   'lab:<key>' = most recent lab value. Available keys:\n  //       hematocrit, platelet, maternal_weight, pulse, wbc\n  //   null        = not in the chart, the card uses `fill` (the pipeline's own value)\n  // A value missing for one patient also falls back to `fill`, like the pipeline does.\n  // Category text is matched without caring about capitalization.\n  // ============================================================\n  const MODEL = {\n    intercept: 0.6164088420636828,\n    numeric: {\n      prior_pph: { coef: 2.4360987194565347, fill: 0.0, source: 'ext:prior-pph' },\n      placenta_accreta: { coef: 2.493923629659058, fill: 0.0, source: 'ext:placenta-accreta' },\n      general_anesthesia: { coef: 1.5276528917015002, fill: 0.0, source: 'ext:general-anesthesia' },\n      multiple_gestation: { coef: 1.49448180558098, fill: 0.0, source: 'ext:multiple-gestation' },\n      placenta_previa: { coef: 1.0331186378169854, fill: 0.0, source: 'ext:placenta-previa' },\n      induction_of_labor: { coef: 0.5174756274680327, fill: 0.0, source: 'ext:induction-of-labor' },\n      augmentation: { coef: 0.5167043101352291, fill: 0.0, source: 'ext:augmentation' },\n      labor_length: { coef: 0.6820149851159096, fill: 0.0, source: 'ext:labor-length' },\n      hypertensive: { coef: 0.4351352677818229, fill: 0.0, source: 'ext:hypertensive-disorder' },\n      prom: { coef: -0.978449646624105, fill: 0.0, source: null },\n      nifedipine: { coef: 0.6555600516442738, fill: 0.0, source: null },\n      terbutaline: { coef: 0.6045103040897166, fill: 0.0, source: null },\n      placental_abruption: { coef: 0.6543639457899865, fill: 0.0, source: null },\n      hematocrit: { coef: -0.13725585527055392, fill: 35.5, source: 'lab:hematocrit' },\n      platelet: { coef: -0.0022503817135468797, fill: 230.2, source: 'lab:platelet' },\n      maternal_weight: { coef: -0.009595479990004173, fill: 81.85, source: 'lab:maternal_weight' },\n      pulse1: { coef: 0.01089718976375829, fill: 88.0, source: 'lab:pulse' },\n      wbc: { coef: 0.04168272505902857, fill: 11.0, source: 'lab:wbc' },\n      calcium: { coef: 0.16447268235407106, fill: 8.8, source: null }\n    },\n    categorical: {\n      delivery_type_label: {\n        source: 'ext:delivery-type', fill: 'vaginal',\n        coef: { 'Cesarean': 0.0, 'instrumented vaginal': -0.33049071811346886, 'vaginal': -1.4171235297546863 }\n      },\n      fetal_size_label: {\n        source: null, fill: 'normal',\n        coef: { 'large': 0.0, 'normal': -0.6233695868014818, 'small': -1.4069626460024596 }\n      }\n    },\n    alertThreshold: 0.03,\n  };\n  // ================= END OF STEP 2 =================\n\n  if (MODEL === null) {\n    return [{ json: { html: errorCard('STEP 2 is still empty', 'The workflow runs, but your model is not wired in yet. Fill in the MODEL block inside <b>PPH: Compute Risk Score</b>, save, and run again.') } }];\n  }\n\n  // ── Scoring: reproduces the pipeline (fill missing values, one-hot encode, logistic regression)\n  const read  = (src) => { if (!src) return null; const [kind, key] = src.split(':'); return kind === 'ext' ? extMap[key] : kind === 'lab' ? input[key] : null; };\n  const toNum = (v) => v === true ? 1 : v === false ? 0 : (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);\n  const pretty = (k) => k.replace(/_label$/, '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());\n\n  let z = MODEL.intercept;\n  const rows = [];\n  for (const [name, f] of Object.entries(MODEL.numeric)) {\n    const v = toNum(read(f.source));\n    const used = v ?? f.fill;\n    z += f.coef * used;\n    rows.push({ label: pretty(name), shown: v === null ? `${f.fill} (filled)` : String(+used.toFixed(2)), contrib: f.coef * (used - f.fill), filled: v === null });\n  }\n  for (const [name, f] of Object.entries(MODEL.categorical)) {\n    const rawV = read(f.source);\n    const cats = Object.keys(f.coef);\n    let cat, w;\n    if (rawV === null || rawV === undefined || rawV === '') { cat = f.fill; w = f.coef[f.fill] ?? 0; }\n    else {\n      cat = cats.find(c => c.toLowerCase() === String(rawV).trim().toLowerCase());\n      w = cat === undefined ? 0 : f.coef[cat];          // unknown category = baseline, like handle_unknown='ignore'\n      if (cat === undefined) cat = String(rawV);\n    }\n    z += w;\n    rows.push({ label: pretty(name), shown: (rawV === null || rawV === undefined || rawV === '') ? `${cat} (filled)` : cat, contrib: w - (f.coef[f.fill] ?? 0), filled: rawV === null || rawV === undefined || rawV === '' });\n  }\n\n  const prob      = 1 / (1 + Math.exp(-z));\n  const probPct   = (prob * 100).toFixed(1);\n  const alert     = prob > MODEL.alertThreshold;\n  const tier      = alert ? 'High (alert)' : 'Low';\n  const tierColor = alert ? '#dc2626' : '#16a34a';\n  const tierBg    = alert ? '#fef2f2' : '#f0fdf4';\n  const outcome   = extMap['pph-outcome'];\n  const outColor  = outcome === 1 ? '#dc2626' : '#16a34a';\n  const outText   = outcome === 1 ? 'PPH occurred' : 'No PPH';\n\n  rows.sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib));\n  const rowHtml = rows.map(r => {\n    const dir  = r.contrib > 0 ? '#dc2626' : r.contrib < 0 ? '#16a34a' : '#9ca3af';\n    const sign = r.contrib > 0 ? '▲' : r.contrib < 0 ? '▼' : '·';\n    const barW = Math.min(100, Math.abs(r.contrib) * 60).toFixed(0);\n    return `<tr style=\"border-bottom:1px solid #f3f4f6;opacity:${r.filled ? '0.45' : '1'}\">\n      <td style=\"padding:5px 10px;font-size:13px\">${r.label}</td>\n      <td style=\"padding:5px 10px;text-align:center;font-size:12px;color:#4f46e5\">${r.shown}</td>\n      <td style=\"padding:5px 10px\"><div style=\"display:flex;align-items:center;gap:6px\">\n        <div style=\"width:70px;background:#f3f4f6;border-radius:3px;height:7px;flex-shrink:0\"><div style=\"width:${barW}%;background:${dir};height:7px;border-radius:3px\"></div></div>\n        <span style=\"font-size:11px;color:${dir};font-weight:700\">${sign} ${r.contrib.toFixed(3)}</span>\n      </div></td>\n    </tr>`;\n  }).join('');\n\n  const html = `\n<div style=\"font-family:system-ui,sans-serif\" data-prob=\"${prob}\">\n  <div style=\"background:${tierBg};border:2px solid ${tierColor};border-radius:12px;padding:18px 22px;margin-bottom:16px;display:flex;align-items:center;gap:18px\">\n    <div style=\"flex:1\">\n      <div style=\"font-size:26px;font-weight:800;color:${tierColor}\">${tier}</div>\n      <div style=\"font-size:16px;font-weight:600;color:${tierColor};margin-top:2px\">${probPct}% predicted PPH probability</div>\n      <div style=\"font-size:11px;color:#6b7280;margin-top:6px\">Scored by my Week 4 model · alert above ${(MODEL.alertThreshold * 100).toFixed(0)}%</div>\n    </div>\n    <div style=\"text-align:center;background:#fff;border-radius:8px;padding:10px 14px;border:1px solid #e5e7eb\">\n      <div style=\"font-size:28px;font-weight:800;color:${tierColor}\">${probPct}%</div>\n      <div style=\"font-size:11px;color:#6b7280\">PPH Prob</div>\n    </div>\n  </div>\n  <div style=\"background:#fff;border:1px solid ${outColor}40;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center\">\n    <div style=\"font-weight:700;font-size:13px;color:${outColor}\">Actual study outcome</div>\n    <div style=\"font-size:15px;font-weight:700;color:${outColor}\">${outText}</div>\n  </div>\n  <div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px\">\n    <div style=\"font-weight:700;font-size:13px;margin-bottom:10px\">What moved the score (compared with a typical patient)</div>\n    <table style=\"width:100%;border-collapse:collapse\">\n      <thead><tr style=\"background:#f9fafb\">\n        <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280\">PREDICTOR</th>\n        <th style=\"padding:7px 10px;text-align:center;font-size:11px;color:#6b7280\">VALUE</th>\n        <th style=\"padding:7px 10px;text-align:left;font-size:11px;color:#6b7280\">CONTRIBUTION</th>\n      </tr></thead>\n      <tbody>${rowHtml}</tbody>\n    </table>\n  </div>\n  <div style=\"font-size:11px;color:#9ca3af;margin-top:8px\">Educational use only · Grayed = not in the chart, filled with the pipeline's own value</div>\n</div>`;\n\n  return [{ json: { html } }];\n\n} catch (err) {\n  return [{ json: { html: errorCard('The scorer hit an error', `${err.message}<br><br>Open n8n's Executions tab for details.`) } }];\n}"
+      },
+      "id": "9eda66f1-abde-4c0a-a769-66e94832cd4a",
+      "name": "PPH: Compute Risk Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7424,
+        -672
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "b18066af-da16-4274-be7c-6a240fbcd0c2",
+      "name": "PPH: Respond Risk",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        7648,
+        -672
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## How to use this template\n\n1. Give this file and your Week 4 model.pkl to your AI assistant, with the prompt from your Learner Guide.\n2. The AI replaces only `const MODEL = null;` (STEP 2) inside **PPH: Compute Risk Score**.\n3. Import the file it gives back into n8n.\n4. Deactivate the reference EPIC PPH workflow, then activate this one.\n5. In the dashboard, select a `pph-` patient and click **Run My PPH Model**.\n\nBefore STEP 2 is filled in, the card says so instead of failing.",
+        "height": 300,
+        "width": 440,
+        "color": 5
+      },
+      "id": "301ea93c-cfa0-44c1-b947-2495e670a06e",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        6240,
+        -1056
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### STEP 2 lives here\nOnly `const MODEL = null;` inside **PPH: Compute Risk Score** changes.",
+        "height": 150,
+        "width": 320,
+        "color": 4
+      },
+      "id": "eedd12bc-0c9b-4fa9-9625-26dc9d3eb594",
+      "name": "Note - AI Task",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        7344,
+        -864
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "GET /list-panels": {
+      "main": [
+        [
+          {
+            "node": "Return Panel Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /my-pph-model-run": {
+      "main": [
+        [
+          {
+            "node": "PPH: Fetch Observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PPH: Fetch Observations": {
+      "main": [
+        [
+          {
+            "node": "PPH: Merge Observations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PPH: Merge Observations": {
+      "main": [
+        [
+          {
+            "node": "PPH: Compute Risk Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PPH: Compute Risk Score": {
+      "main": [
+        [
+          {
+            "node": "PPH: Respond Risk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5d78c78a-354a-455e-b2b6-38e3d832f486",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "245eda27ad2467a62f7bd9f4388d1ab840584661a8787aef92bf708584af7522"
+  },
+  "id": "sv6360MoOQufXtOs",
+  "tags": []
+}
